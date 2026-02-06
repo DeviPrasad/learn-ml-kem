@@ -66,6 +66,46 @@ pub fn _byte_encode_bssl_(f: [u16; N], enc: &mut [u8], bits: u8) {
 }
 
 #[allow(dead_code)]
+// parses |DEGREE * bits| bits from |enc| into |DEGREE| values in
+// |dec|. It returns one on success and zero if any parsed value is >= |kPrime|.
+pub fn _byte_decode_bssl_(enc: &[u8], dec: &mut [u16; N], bits: u8) -> bool {
+    assert!(bits > 1 && bits <= 12);
+    const MASKS: [u8; 8] = [0x01, 0x03, 0x07, 0x0f, 0x1f, 0x3f, 0x7f, 0xff];
+
+    let mut in_byte = 0u8;
+    let mut in_byte_bits_left = 0u8;
+
+    let mut j = 0;
+    for i in 0..N {
+        let mut element: u16 = 0;
+        let mut element_bits_done = 0u8;
+        while (element_bits_done < bits) {
+            if (in_byte_bits_left == 0) {
+                in_byte = enc[j];
+                j += 1;
+                in_byte_bits_left = 8;
+            }
+            let mut chunk_bits = bits - element_bits_done;
+            if (chunk_bits > in_byte_bits_left) {
+                chunk_bits = in_byte_bits_left;
+            }
+            element |= ((in_byte & MASKS[chunk_bits as usize - 1]) as u16) << element_bits_done as u16;
+            in_byte_bits_left -= chunk_bits;
+            in_byte >>= chunk_bits;
+
+            element_bits_done += chunk_bits;
+        }
+        // An element is only out of range in the case of invalid input, in which
+        // case it is okay to leak the comparison.
+        if element >= Q as u16 {
+            return false;
+        }
+        dec[i] = element;
+    }
+    true
+}
+
+#[allow(dead_code)]
 pub fn byte_encode(f: [u16; N], enc: &mut [u8], d: u8) {
     assert!(enc.len() >= 32 * d as usize);
     assert!([10, 11, 12].contains(&d));
