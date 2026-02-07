@@ -79,19 +79,25 @@ pub fn _byte_decode_bssl_(enc: &[u8], dec: &mut [u16; N], bits: u8) -> bool {
     for i in 0..N {
         let mut element: u16 = 0;
         let mut element_bits_done = 0u8;
-        while (element_bits_done < bits) {
-            if (in_byte_bits_left == 0) {
+        while element_bits_done < bits {
+            if in_byte_bits_left == 0 {
                 in_byte = enc[j];
                 j += 1;
                 in_byte_bits_left = 8;
             }
             let mut chunk_bits = bits - element_bits_done;
-            if (chunk_bits > in_byte_bits_left) {
+            if chunk_bits > in_byte_bits_left {
                 chunk_bits = in_byte_bits_left;
             }
-            element |= ((in_byte & MASKS[chunk_bits as usize - 1]) as u16) << element_bits_done as u16;
+            element |= ((in_byte & MASKS[chunk_bits as usize - 1]) as u16) << element_bits_done;
             in_byte_bits_left -= chunk_bits;
-            in_byte >>= chunk_bits;
+            assert!(chunk_bits <= 8);
+            // condirional shift right; avoid "attempt to shift right with overflow" error
+            if chunk_bits < 8 {
+                in_byte >>= chunk_bits;
+            } else {
+                in_byte = 0;
+            }
 
             element_bits_done += chunk_bits;
         }
@@ -136,6 +142,33 @@ pub fn byte_encode(f: [u16; N], enc: &mut [u8], d: u8) {
     assert_eq!(j, enc.len());
     assert_eq!(bidx, 0);
     assert_eq!(b, 0);
+}
+
+#[allow(dead_code)]
+pub fn byte_decode(b: &[u8], dec: &mut [u16; N], d: u8) {
+    assert!(b.len() >= 32 * d as usize);
+    assert!([10, 11, 12].contains(&d));
+    let mut bidx: u8 = 0; // # bits filled in 'b' [0..8)
+    let mut j = 0;
+    for i in 0..N {
+        let mut c: u16 = 0; // output byte
+        let mut cidx: u8 = 0;
+        while cidx < d {
+            c |= ((b[j] >> bidx) as u16) << cidx;
+            c &= (1 << d) - 1;
+            let bits = min(8-bidx, d-cidx);
+            bidx += bits;
+            assert!(bidx <= 8);
+            cidx += bits;
+            if bidx == 8 {
+                j += 1;
+                bidx = 0;
+            }
+        }
+        dec[i] = c;
+    }
+    assert_eq!(j, b.len());
+    assert_eq!(bidx, 0);
 }
 
 #[allow(dead_code)]
@@ -191,7 +224,7 @@ impl RingElement {
 #[cfg(test)]
 mod ring_tests {
     use crate::params::{DU, N, Q};
-    use crate::ring::{_byte_encode_bssl_, byte_decode_1, byte_encode};
+    use crate::ring::{_byte_decode_bssl_, _byte_encode_bssl_, byte_decode, byte_decode_1, byte_encode};
 
     #[cfg(test)]
     fn gen_random_u16(mask: u16) -> u16 {
@@ -299,5 +332,48 @@ mod ring_tests {
             byte_decode_1(&b, &mut dec);
             assert_eq!(dec, [1u16; N]);
         }
+    }
+
+    #[test]
+    fn test_byte_encode_decode_q_mius_1() {
+        #[cfg(any(feature = "ML_KEM_512", feature = "ML_KEM_768"))]
+        let f = [Q as u16 & 0x3FF; N];
+        #[cfg(feature = "ML_KEM_1024")]
+        let f = [Q as u16 & 0x7FF; N];
+
+        let mut enc = [0u8; 32 * DU as usize];
+        let mut enc_bssl = [0u8; 32 * DU as usize];
+        byte_encode(f, &mut enc, DU);
+        _byte_encode_bssl_(f, &mut enc_bssl, DU);
+        assert_eq!(enc, enc_bssl);
+
+        let mut dec = [Q as u16 & 0x3FF; N];
+        let mut dec_bssl = [Q as u16 & 0x3FF; N];
+        byte_decode(&enc, &mut dec, DU);
+        assert_eq!(dec, f);
+        let ok = _byte_decode_bssl_(&enc, &mut dec_bssl, DU);
+        assert!(ok);
+        assert_eq!(dec, dec_bssl);
+    }
+    #[test]
+    fn test_byte_encode_decode_random_arr() {
+        #[cfg(any(feature = "ML_KEM_512", feature = "ML_KEM_768"))]
+        let f = gen_random_u16_array(0x3FF);
+        #[cfg(feature = "ML_KEM_1024")]
+        let f = gen_random_u16_array(0x7FF);
+
+        let mut enc = [0u8; 32 * DU as usize];
+        let mut enc_bssl = [0u8; 32 * DU as usize];
+        byte_encode(f, &mut enc, DU);
+        _byte_encode_bssl_(f, &mut enc_bssl, DU);
+        assert_eq!(enc, enc_bssl);
+
+        let mut dec = [0u16; N];
+        byte_decode(&enc, &mut dec, DU);
+        assert_eq!(dec, f);
+        let mut dec_bssl = [0u16; N];
+        let ok = _byte_decode_bssl_(&enc, &mut dec_bssl, DU);
+        assert!(ok);
+        assert_eq!(dec, dec_bssl);
     }
 }
