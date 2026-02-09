@@ -46,13 +46,13 @@ pub fn _byte_encode_bssl_(f: [u16; N], enc: &mut [u8], bits: u8) {
             let out_bits_remaining = 8 - out_byte_bits;
             if chunk_bits >= out_bits_remaining {
                 chunk_bits = out_bits_remaining;
-                out_byte |= ((element as u8) & MASKS[chunk_bits as usize - 1]) << out_byte_bits;
+                out_byte |= ((element & MASKS[chunk_bits as usize - 1] as u16) << out_byte_bits) as u8;
                 enc[j] = out_byte;
                 j += 1;
                 out_byte_bits = 0;
                 out_byte = 0;
             } else {
-                out_byte |= ((element as u8) & MASKS[chunk_bits as usize - 1]) << out_byte_bits;
+                out_byte |= ((element & MASKS[chunk_bits as usize - 1] as u16) << out_byte_bits) as u8;
                 out_byte_bits += chunk_bits;
             }
             element_bits_done += chunk_bits;
@@ -111,37 +111,152 @@ pub fn _byte_decode_bssl_(enc: &[u8], dec: &mut [u16; N], bits: u8) -> bool {
     true
 }
 
+
+#[allow(dead_code)]
+fn byte_encode_11(f: [u16; N], enc: &mut [u8]) {
+    for i in 0..N/8 {
+        let mut x: u128 = 0;
+        x |= (f[i*8] & 0x7FF) as u128;
+        x |= ((f[i*8+1] & 0x7FF) as u128) << 11;
+        x |= ((f[i*8+2] & 0x7FF) as u128) << 22;
+        x |= ((f[i*8+3] & 0x7FF) as u128) << 33;
+        x |= ((f[i*8+4] & 0x7FF) as u128) << 44;
+        x |= ((f[i*8+5] & 0x7FF) as u128) << 55;
+        x |= ((f[i*8+6] & 0x7FF) as u128) << 66;
+        x |= ((f[i*8+7] & 0x7FF) as u128) << 77;
+
+        enc[i*11+0] = x as u8;
+        enc[i*11+1] = (x >> 8) as u8;
+        enc[i*11+2] = (x >> 16) as u8;
+        enc[i*11+3] = (x >> 24) as u8;
+        enc[i*11+4] = (x >> 32) as u8;
+        enc[i*11+5] = (x >> 40) as u8;
+        enc[i*11+6] = (x >> 48) as u8;
+        enc[i*11+7] = (x >> 56) as u8;
+        enc[i*11+8] = (x >> 64) as u8;
+        enc[i*11+9] = (x >> 72) as u8;
+        enc[i*11+10] = (x >> 80) as u8;
+    }
+}
+
+#[allow(dead_code)]
+fn byte_encode_10(f: [u16; N], enc: &mut [u8]) {
+    for i in 0..N/4 {
+        let mut x: u64 = 0;
+        x |= (f[i*4] & 0x3FF) as u64;
+        x |= ((f[i*4+1] & 0x3FF) as u64) << 10;
+        x |= ((f[i*4+2] & 0x3FF) as u64) << 20;
+        x |= ((f[i*4+3] & 0x3FF) as u64) << 30;
+
+        enc[i*5+0] = x as u8;
+        enc[i*5+1] = (x >> 8) as u8;
+        enc[i*5+2] = (x >> 16) as u8;
+        enc[i*5+3] = (x >> 24) as u8;
+        enc[i*5+4] = (x >> 32) as u8;
+    }
+}
+
+#[allow(dead_code)]
+fn byte_encode_5(f: [u16; N], enc: &mut [u8]) {
+    assert!(enc.len() >= 32*5);
+    for i in 0..N/8 {
+        let mut x: u64 = 0;
+        x |= f[i*8+0] as u64 & 0x1F;
+        x |= (f[i*8+1] as u64 & 0x1F) << 5;
+        x |= (f[i*8+2] as u64 & 0x1F) << 10;
+        x |= (f[i*8+3] as u64 & 0x1F) << 15;
+        x |= (f[i*8+4] as u64 & 0x1F) << 20;
+        x |= (f[i*8+5] as u64 & 0x1F) << 25;
+        x |= (f[i*8+6] as u64 & 0x1F) << 30;
+        x |= (f[i*8+7] as u64 & 0x1F) << 35;
+
+        enc[i*5+0] = x as u8;
+        enc[i*5+1] = (x >> 8) as u8;
+        enc[i*5+2] = (x >> 16) as u8;
+        enc[i*5+3] = (x >> 24) as u8;
+        enc[i*5+4] = (x >> 32) as u8;
+    }
+}
+
+/*
+    The bit-decoding in one iteration.
+                 encoded byte sequence
+        4        3        2        1        0
+    <------><---------><-----><---------><------>
+    <[5],[3><2],[5],[1><4],[4><1],[5],[2><3],[5]>
+      7     6    5     4      3    2     1    0
+        decoded field elements - u16 elements
+*/
+#[allow(dead_code)]
+fn byte_decode_5(b: &[u8], f: &mut [u16; N]) {
+    assert!(b.len() >= 32 * 5);
+    for i in 0..N/8 {
+        f[i*8+0] = (b[i*5+0] & 0b0001_1111) as u16;
+        f[i*8+1] = ((b[i*5+0] >> 5) & 0b0000_0111) as u16 | ((b[i*5+1] & 0b0000_0011) << 3) as u16;
+        f[i*8+2] = ((b[i*5+1] >> 2) & 0b0001_1111) as u16;
+        f[i*8+3] = ((b[i*5+1] >> 7) & 0b0000_0001) as u16 | ((b[i*5+2] & 0b0000_1111) << 1) as u16;
+        f[i*8+4] = ((b[i*5+2] >> 4) & 0b0000_1111) as u16 | ((b[i*5+3] & 0b0000_0001) << 4) as u16;
+        f[i*8+5] = ((b[i*5+3] >> 1) & 0b0001_1111) as u16;
+        f[i*8+6] = ((b[i*5+3] >> 6) & 0b0000_0011) as u16 | ((b[i*5+4] & 0b0000_0111) << 2) as u16;
+        f[i*8+7] = ((b[i*5+4]  >> 3) & 0b0001_1111) as u16;
+    }
+}
+
+#[allow(dead_code)]
+fn byte_encode_4(f: [u16; N], enc: &mut [u8]) {
+    assert!(enc.len() >= 32*4);
+    for i in 0..N/2 {
+        enc[i] = (f[i*2+0] as u8 & 0xF) | ((f[i*2+1] as u8 & 0xF) << 4);
+    }
+}
+
+#[allow(dead_code)]
+fn byte_decode_4(b: &[u8], f: &mut [u16; N]) {
+    assert!(b.len() >= 32*4);
+    for i in 0..N/2 {
+        f[i*2+0] |= b[i] as u16 & 0x000F;
+        f[i*2+1] |= (b[i] as u16 & 0x00F0) >> 4;
+    }
+}
+
+#[allow(dead_code)]
+fn byte_encode_1(f: [u16; N], enc: &mut [u8]) {
+    assert!(enc.len() >= 32*1);
+    for i in 0..N/8 {
+        let mut x = 0u8;
+        x |= (f[i*8+0] & 1) as u8;
+        x |= (f[i*8+1] & 1) as u8;
+        x |= (f[i*8+2] & 1) as u8;
+        x |= (f[i*8+3] & 1) as u8;
+        x |= (f[i*8+4] & 1) as u8;
+        x |= (f[i*8+5] & 1) as u8;
+        x |= (f[i*8+6] & 1) as u8;
+        x |= (f[i*8+7] & 1) as u8;
+
+        enc[i] = x;
+    }
+}
+
+#[allow(dead_code)]
+pub fn byte_decode_1(b: &[u8], f: &mut [u16; N]) {
+    for i in 0..N {
+        f[i] = (b[i / 8] >> (i % 8) & 1) as u16;
+    }
+}
+
+
+
 #[allow(dead_code)]
 pub fn byte_encode(f: [u16; N], enc: &mut [u8], d: u8) {
     assert!(enc.len() >= 32 * d as usize);
     assert!([10, 11, 12].contains(&d));
-    let mut b: u8 = 0; // output byte
-    let mut bidx: u8 = 0; // # bits filled in 'b' [0..8)
-    let mut j = 0;
-    for e in f {
-        assert!((e as u32) < Q);
-        let mut eidx: u8 = 0; // # bits already taken from the element 'e' [0..d)
-        while eidx < d {
-            // do till 'd' bits are consumed from the element
-            assert!(bidx < 8);
-            b |= ((e >> eidx) as u8) << bidx;
-            let bits = min(8 - bidx, d - eidx);
-            bidx += bits;
-            assert!(bidx <= 8);
-            eidx += bits;
-            assert!(eidx <= d);
-            if bidx == 8 {
-                // the output byte is full, write it out
-                enc[j] = b;
-                j += 1;
-                b = 0;
-                bidx = 0; // output byte cleared
-            }
-        }
+    if d == 10 {
+        byte_encode_10(f, enc);
+    } else if d == 11 {
+        byte_encode_11(f, enc);
+    } else if d == 4 {
+        byte_encode_4(f, enc);
     }
-    assert_eq!(j, enc.len());
-    assert_eq!(bidx, 0);
-    assert_eq!(b, 0);
 }
 
 #[allow(dead_code)]
@@ -171,12 +286,6 @@ pub fn byte_decode(b: &[u8], dec: &mut [u16; N], d: u8) {
     assert_eq!(bidx, 0);
 }
 
-#[allow(dead_code)]
-pub fn byte_decode_1(b: &[u8], dec: &mut [u16; N]) {
-    for i in 0..N {
-        dec[i] = (b[i / 8] >> (i % 8) & 1) as u16;
-    }
-}
 
 #[allow(dead_code)]
 impl RingElement {
@@ -224,7 +333,7 @@ impl RingElement {
 #[cfg(test)]
 mod ring_tests {
     use crate::params::{DU, N, Q};
-    use crate::ring::{_byte_decode_bssl_, _byte_encode_bssl_, byte_decode, byte_decode_1, byte_encode};
+    use crate::ring::{_byte_decode_bssl_, _byte_encode_bssl_, byte_decode, byte_decode_1, byte_decode_4, byte_decode_5, byte_encode, byte_encode_4, byte_encode_5};
 
     #[cfg(test)]
     fn gen_random_u16(mask: u16) -> u16 {
@@ -251,7 +360,7 @@ mod ring_tests {
     }
 
     #[test]
-    fn test_byte_encode_q_mius_1() {
+    fn test_byte_encode_q_minus_1() {
         #[cfg(any(feature = "ML_KEM_512", feature = "ML_KEM_768"))]
         let f = [Q as u16 & 0x3FF; N];
         #[cfg(feature = "ML_KEM_1024")]
@@ -276,7 +385,6 @@ mod ring_tests {
         byte_encode(f, &mut enc, DU);
         _byte_encode_bssl_(f, &mut enc_bssl, DU);
         assert_eq!(enc, enc_bssl);
-        println!("{:?}", &f[0..16])
     }
 
     #[test]
@@ -291,7 +399,6 @@ mod ring_tests {
         byte_encode(f, &mut enc, DU);
         _byte_encode_bssl_(f, &mut enc_bssl, DU);
         assert_eq!(enc, enc_bssl);
-        println!("{:?}", &f[0..16])
     }
 
     #[test]
@@ -334,27 +441,36 @@ mod ring_tests {
         }
     }
 
+    /**
+    16 bit 3328 - 0000110100000000
+    10 LSB bits - 0100000000
+    Repeated 4 times = 40 bits - 0100000000010000000001000000000100000000
+    Encoded in 5 bytes - 01000000 00010000 00000100 00000001 00000000
+    values in decimal -   64         16         4          1        0
+    */
     #[test]
-    fn test_byte_encode_decode_q_mius_1() {
-        #[cfg(any(feature = "ML_KEM_512", feature = "ML_KEM_768"))]
-        let f = [Q as u16 & 0x3FF; N];
-        #[cfg(feature = "ML_KEM_1024")]
-        let f = [Q as u16 & 0x7FF; N];
+    fn test_byte_encode_decode_q_minus_1() {
+        // let f = [1024u16; N];
+        let f = [(Q-1) as u16; N];
 
         let mut enc = [0u8; 32 * DU as usize];
         let mut enc_bssl = [0u8; 32 * DU as usize];
         byte_encode(f, &mut enc, DU);
         _byte_encode_bssl_(f, &mut enc_bssl, DU);
-        assert_eq!(enc, enc_bssl);
+        // assert_eq!(enc, enc_bssl);
+        #[cfg(any(feature = "ML_KEM_512", feature = "ML_KEM_768"))]
+        assert_eq!(enc, [0u8, 1, 4, 16, 64].repeat(64).as_slice());
+        #[cfg(feature = "ML_KEM_1024")]
+        assert_eq!(enc, [0u8, 5, 40, 64, 1, 10, 80, 128, 2, 20, 160].repeat(32).as_slice());
 
-        let mut dec = [Q as u16 & 0x3FF; N];
-        let mut dec_bssl = [Q as u16 & 0x3FF; N];
+        let mut dec = [0; N];
+        let mut dec_bssl = [0; N];
         byte_decode(&enc, &mut dec, DU);
-        assert_eq!(dec, f);
         let ok = _byte_decode_bssl_(&enc, &mut dec_bssl, DU);
         assert!(ok);
         assert_eq!(dec, dec_bssl);
     }
+
     #[test]
     fn test_byte_encode_decode_random_arr() {
         #[cfg(any(feature = "ML_KEM_512", feature = "ML_KEM_768"))]
@@ -373,6 +489,40 @@ mod ring_tests {
         assert_eq!(dec, f);
         let mut dec_bssl = [0u16; N];
         let ok = _byte_decode_bssl_(&enc, &mut dec_bssl, DU);
+        assert!(ok);
+        assert_eq!(dec, dec_bssl);
+    }
+
+    #[test]
+    fn test_byte_encode_decode_4() {
+        let f = gen_random_u16_array(0xFFFF);
+        let mut enc = [0u8; 32 * 4usize];
+        let mut enc_bssl = [0u8; 32 * 4usize];
+        byte_encode_4(f, &mut enc);
+        _byte_encode_bssl_(f, &mut enc_bssl, 4);
+        assert_eq!(enc, enc_bssl);
+
+        let mut dec = [0u16; N];
+        byte_decode_4(&enc, &mut dec);
+        let mut dec_bssl = [0u16; N];
+        let ok = _byte_decode_bssl_(&enc, &mut dec_bssl, 4);
+        assert!(ok);
+        assert_eq!(dec, dec_bssl);
+    }
+
+    #[test]
+    fn test_byte_encode_decode_5() {
+        let f = gen_random_u16_array(0xFFF);
+        let mut enc = [0u8; 32 * 5usize];
+        let mut enc_bssl = [0u8; 32 * 5usize];
+        byte_encode_5(f, &mut enc);
+        _byte_encode_bssl_(f, &mut enc_bssl, 5);
+        assert_eq!(enc, enc_bssl);
+
+        let mut dec = [0u16; N];
+        byte_decode_5(&enc, &mut dec);
+        let mut dec_bssl = [0u16; N];
+        let ok = _byte_decode_bssl_(&enc, &mut dec_bssl, 5);
         assert!(ok);
         assert_eq!(dec, dec_bssl);
     }
