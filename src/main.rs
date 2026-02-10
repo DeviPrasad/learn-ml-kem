@@ -5,6 +5,8 @@ mod codec;
 mod field;
 mod params;
 mod ring;
+mod ntt;
+mod sampler;
 
 fn main() {
     assert!(DU < 12);
