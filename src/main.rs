@@ -5,11 +5,15 @@ mod codec;
 mod field;
 mod params;
 mod ring;
+mod ntt;
+mod sampler;
+mod pke;
+mod prf;
 
 fn main() {
     assert!(DU < 12);
     for x in 0..Q {
-        let t = FieldElement::from(x).compress::<DU>();
+        let t = FieldElement::from(x as i32).compress::<DU>();
         assert!(u16::from(t) <= (1 << DU) - 1)
     }
 }

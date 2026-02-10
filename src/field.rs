@@ -1,32 +1,80 @@
 use crate::params::{BARRETT_MULTIPLIER, BARRETT_SHIFT, HALF_Q, Q};
 
-#[derive(Clone, Copy, Default)]
-pub struct FieldElement {
-    v: u16,
+pub fn _modq_(x: i32) -> u16 {
+    let x = x as i64;
+    let mut t = (x - (((x * 5039) >> 24) * 3329)) as i32;
+
+    // Ensure t is in [0, 2*Q)
+    t += (t >> 31) & 3329;
+    // Reduce from [0, 2*Q) to [0, Q)
+    t -= ((t >= 3329) as i32) * 3329;
+    t as u16
 }
 
-impl From<u32> for FieldElement {
-    fn from(x: u32) -> Self {
-        let v = (x % Q) as u16;
+
+pub fn modq(x: i32) -> i32 {
+    let _expected = _modq_(x);
+    let x = x as i64;
+    let t = (x - (((x * 5039) >> 24) * 3329)) as i32;
+
+    let t = if t < 0 {
+        (t + 3329) as u16
+    } else if t >= 3329 {
+        (t - 3329) as u16
+    } else {
+        t as u16
+    };
+
+    assert_eq!(t, _expected);
+    t as i32
+}
+
+#[derive(Clone, Copy, Default)]
+pub struct FieldElement {
+    v: i32,
+}
+
+impl From<i32> for FieldElement {
+    fn from(x: i32) -> Self {
+        let v = x % Q as i32;
         Self { v }
     }
 }
 
 impl From<u16> for FieldElement {
     fn from(x: u16) -> Self {
-        Self::from(x as u32)
+        Self::from(x as i32)
     }
 }
 
-impl From<FieldElement> for u32 {
-    fn from(fe: FieldElement) -> u32 {
-        fe.v as u32
+impl From<FieldElement> for i32 {
+    fn from(fe: FieldElement) -> i32 {
+        fe.v
     }
 }
 
 impl From<FieldElement> for u16 {
     fn from(fe: FieldElement) -> u16 {
-        fe.v
+        fe.v as u16
+    }
+}
+
+impl FieldElement {
+
+    pub fn reduce_once(a: i32) -> Self {
+        let x = a - Q as i32;
+        Self {
+            v: x + (x >> 15) * Q as i32
+        }
+    }
+    pub fn add(a: &Self, b: &Self) -> Self {
+        let x = a.v + b.v;
+        FieldElement::reduce_once(x)
+    }
+
+    pub fn sub(a: &Self, b: &Self) -> Self {
+        let x = a.v - b.v + Q as i32;
+        FieldElement::reduce_once(x)
     }
 }
 
@@ -67,12 +115,27 @@ pub fn decompress_1<const D: u8>(y: u16) -> u16 {
 impl FieldElement {
     // maps a field element uniformly to the range 0 to 2ᵈ-1 per FIPS 203, Def 4.7.
     pub fn compress<const D: u8>(&self) -> u16 {
-        compress::<D>(self.v)
+        compress::<D>(self.v as u16)
     }
     pub fn decompress<const D: u8>(y: u16) -> FieldElement {
         FieldElement::from(decompress::<D>(y))
     }
 }
+
+
+#[cfg(test)]
+mod modq_tests {
+    use crate::field::modq;
+    use crate::params::Q;
+
+    #[test]
+    fn test_modq() {
+        for x in 0..0x0FFFFFFi32 {
+            assert_eq!(x % Q as i32, modq(x));
+        }
+    }
+}
+
 
 #[cfg(test)]
 mod compress_tests {
@@ -114,7 +177,7 @@ mod decompress_tests {
         ))]
         {
             for x in 0..Q {
-                let t: u32 = decompress::<DU>(FieldElement::from(x).compress::<DU>().into()).into();
+                let t: u32 = decompress::<DU>(FieldElement::from(x as i32).compress::<DU>().into()).into();
                 // abs_diff = 3328, y = 3328, t = 0
                 assert!(x.abs_diff(t) <= 2 || Q.abs_diff(x.abs_diff(t)) <= 1);
             }
