@@ -9,9 +9,11 @@ getrandom = "0.4.1"
 sha3 = "0.11.0-rc.3"
 # zeroize = "1.8.2"
 
+[dev-dependencies]
+hex = "0.4.3"
 
 [features]
-default = ["ML_KEM_512"]
+default = ["ML_KEM_768"]
 ML_KEM_512 = []
 ML_KEM_768 = []
 ML_KEM_1024 = []

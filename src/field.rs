@@ -1,5 +1,6 @@
 use crate::params::{BARRETT_MULTIPLIER, BARRETT_SHIFT, HALF_Q, Q};
 
+#[inline(always)]
 pub fn _modq_(x: i32) -> u16 {
     let x = x as i64;
     let mut t = (x - (((x * 5039) >> 24) * 3329)) as i32;
@@ -12,6 +13,7 @@ pub fn _modq_(x: i32) -> u16 {
 }
 
 
+#[inline(always)]
 pub fn modq(x: i32) -> i32 {
     let _expected = _modq_(x);
     let x = x as i64;
@@ -29,6 +31,22 @@ pub fn modq(x: i32) -> i32 {
     t as i32
 }
 
+#[inline(always)]
+pub fn modq_i64(x: i64) -> i32 {
+    // Barrett reduction with k = 24
+    // t = x - floor(x * 5039 / 2^24) * 3329
+    let t = x - (((x * 5039) >> 24) * 3329);
+
+    // Final conditional subtraction
+    let mut r = t as i32;
+    if r < 0 {
+        r += 3329;
+    } else if r >= 3329 {
+        r -= 3329;
+    }
+    r
+}
+
 #[derive(Clone, Copy, Default)]
 pub struct FieldElement {
     v: i32,
@@ -36,7 +54,7 @@ pub struct FieldElement {
 
 impl From<i32> for FieldElement {
     fn from(x: i32) -> Self {
-        let v = x % Q as i32;
+        let v = modq(x);
         Self { v }
     }
 }
@@ -61,20 +79,17 @@ impl From<FieldElement> for u16 {
 
 impl FieldElement {
 
-    pub fn reduce_once(a: i32) -> Self {
-        let x = a - Q as i32;
-        Self {
-            v: x + (x >> 15) * Q as i32
-        }
+    pub fn reduce_once(a: i32) -> i32 {
+        assert_eq!((((a >> 31) & 1) * Q as i32) + a, modq(a));
+        (((a >> 31) & 1) * Q as i32) + a
     }
+
     pub fn add(a: &Self, b: &Self) -> Self {
-        let x = a.v + b.v;
-        FieldElement::reduce_once(x)
+        Self::reduce_once(a.v + b.v).into()
     }
 
     pub fn sub(a: &Self, b: &Self) -> Self {
-        let x = a.v - b.v + Q as i32;
-        FieldElement::reduce_once(x)
+        Self::reduce_once(a.v - b.v).into()
     }
 }
 

@@ -42,14 +42,14 @@ impl Into<[u16; N]> for &RingElement {
 impl From<&[i32; N]> for RingElement {
     fn from(farr: &[i32; N]) -> Self {
         Self {
-            c: farr.map(|e| i32::from(e)),
+            c: farr.clone(),
         }
     }
 }
 
 impl Into<[i32; N]> for &RingElement {
     fn into(self) -> [i32; N] {
-        self.c.clone()
+        self.c
     }
 }
 
@@ -100,8 +100,12 @@ impl RingElement {
 #[allow(dead_code)]
 pub type Poly = RingElement;
 impl Poly {
-    pub fn coefficients(&self) -> [i32; N] {
-        self.c.clone()
+    pub fn coefficients(&mut self) -> &mut [i32] {
+        self.c.as_mut()
+    }
+
+    pub fn coeff(&self) -> [i32; N] {
+        self.c
     }
 }
 

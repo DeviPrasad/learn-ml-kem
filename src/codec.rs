@@ -110,21 +110,26 @@ pub fn _byte_decode_bssl_(enc: &[u8], dec: &mut [u16; N], bits: u8) -> bool {
 }
 
 #[allow(dead_code)]
-fn byte_encode_12(f: [u16; N], enc: &mut [u8]) {
+pub fn byte_encode_12(f: [u16; N], enc: &mut [u8]) {
     assert_eq!(enc.len(), 32 * 12);
-    for i in 0..N / 2 {
+    for i in 0..N/2 {
         let mut x = 0;
-        x |= (f[i * 2 + 0] & 0xFFF) as u32 | ((f[i * 2 + 1] & 0xFFF) as u32) << 12;
+        x |= (f[i * 2 + 0] & 0xFFF) as u32 | (((f[i * 2 + 1] & 0xFFF) as u32) << 12);
         enc[3 * i] = x as u8;
         enc[3 * i + 1] = (x >> 8) as u8;
         enc[3 * i + 2] = (x >> 16) as u8;
+    }
+    {
+        let mut _bssl_enc_ = [0u8; 384];
+        _byte_encode_bssl_(f, &mut _bssl_enc_, 12);
+        assert_eq!(enc, _bssl_enc_);
     }
 }
 
 #[allow(dead_code)]
 fn byte_decode_12(b: &[u8], f: &mut [u16; N]) {
     assert_eq!(b.len(), 32 * 12);
-    for i in 0..N / 2 {
+    for i in 0..N/2 {
         let mut x = 0u32;
         x |= b[i * 3 + 0] as u32 | (b[i * 3 + 1] as u32) << 8 | (b[i * 3 + 2] as u32) << 16;
         f[i * 2 + 0] = x as u16 & 0xFFF;

@@ -1,7 +1,7 @@
-use crate::field::modq;
+use crate::field::{modq, modq_i64};
 use crate::params::{N, Q};
 use crate::ring::Poly;
-use crate::sampler::XOF;
+use crate::sampler::XOF128;
 
 #[allow(unused)]
 // [pow(17, bitreverse(i), p) for i in range(128)]
@@ -44,8 +44,7 @@ pub fn bit_rev_7(x: u8) -> usize {
 }
 
 #[allow(unused)]
-#[derive(Clone, Debug)]
-#[derive(Copy)]
+#[derive(Clone, Debug, Copy)]
 pub struct NTT {
     c: [i32; N],
 }
@@ -53,6 +52,12 @@ pub struct NTT {
 impl Default for NTT {
     fn default() -> Self {
         NTT::from_poly(&Poly::default())
+    }
+}
+
+impl Into<[u16; N]> for NTT {
+    fn into(self) -> [u16; N] {
+        self.c.map(|x| x as u16)
     }
 }
 
@@ -78,14 +83,12 @@ fn pow_mod_q(n: i32, exp: u8) -> i32 {
 #[allow(unused)]
 impl NTT {
     pub fn from_poly(f: &Poly) -> Self {
-        let mut fh: [u16; N] = f.into();
-        let mut fh = fh.map(|x| x as i32);
+        let mut fh = f.coeff();
         let mut i = 1u8;
         let mut len = 128usize;
         while len >= 2 {
             let mut start = 0_usize;
             while start < N {
-                //debug_assert_eq!(pow_mod_q(17, i.reverse_bits()), NTT_ROOTS[bit_rev_7(i)] as i32);
                 let zeta = NTT_ROOTS[i as usize] as i32;
                 i += 1;
                 for j in start..start + len {
@@ -93,7 +96,7 @@ impl NTT {
                     fh[j + len] = modq(fh[j] - t);
                     fh[j] = modq(fh[j] + t);
                 }
-                start += 2 * len;
+                start += (2 * len);
             }
             len /= 2;
         }
@@ -114,7 +117,7 @@ impl NTT {
                     f[j] = modq(t + f[j + len]);
                     f[j + len] = modq(zeta * (f[j + len] - t));
                 }
-                start += len * 2;
+                start += (len * 2);
             }
             len *= 2;
         }
@@ -123,27 +126,27 @@ impl NTT {
     }
 
     pub fn add(&self, that: &NTT) -> Self {
-        let mut fh = self.c;
-        let mut th = that.c;
+        let fh = self.c;
+        let th = that.c;
         NTT {
             c: std::array::from_fn(|i| modq((fh[i] + th[i]))),
         }
     }
 
     pub fn sub(&self, that: &NTT) -> Self {
-        let mut fh = self.c;
-        let mut th = that.c;
+        let fh = self.c;
+        let th = that.c;
         NTT {
             c: std::array::from_fn(|i| modq((fh[i] - th[i]))),
         }
     }
 
     pub fn mul(&self, that: &NTT) -> Self {
-        let mut fh = self.c;
-        let mut th = that.c;
+        let fh = self.c;
+        let th = that.c;
         let mut rh: [i32; N] = [0i32; N];
 
-        for i in 0..128 {
+        for i in 0..N / 2 {
             (rh[2 * i], rh[2 * i + 1]) = Self::base_case_multiply(
                 fh[2 * i],
                 fh[2 * i + 1],
@@ -156,13 +159,13 @@ impl NTT {
     }
 
     pub fn base_case_multiply(a0: i32, a1: i32, b0: i32, b1: i32, gamma: i32) -> (i32, i32) {
-        let c0 = modq(a0 * b0 + a1 * b1 * gamma);
-        let c1 = modq(a0 * b1 + a1 * b0);
+        let c0 = modq_i64((a0 as i64 * b0 as i64 + a1 as i64 * b1 as i64 * gamma as i64));
+        let c1 = modq_i64((a0 as i64 * b1 as i64 + a1 as i64 * b0 as i64));
         (c0, c1)
     }
 
     pub fn coefficients(&self) -> [i32; N] {
-        self.c.clone()
+        self.c
     }
 }
 
@@ -171,13 +174,15 @@ impl NTT {
     // Algorithm 7. SamplerNTT(B)
     #[allow(dead_code)]
     pub fn sample_ntt(b: &[u8; 34], ah: &mut NTT) {
-        let mut xr = XOF::absorb_finalize(b);
+        let mut xr = XOF128::absorb_finalize(b);
         let mut j = 0;
         while j < 256 {
             let mut c = [0u8; 3];
             xr.squeeze(&mut c);
-            let d1 = c[0] as u16 + (c[1] as u16 & 0xF) << 8;
-            let d2 = c[1] as u16 >> 4 + (c[2] as u16) << 4;
+            let d1 = (c[0] as u16) + (((c[1] & 0xF) as u16) << 8);
+            let d2 = ((c[1] >> 4) as u16) + ((c[2] as u16) << 4);
+            assert!(d1 < (1 << 12));
+            assert!(d2 < (1 << 12));
             if d1 < Q as u16 {
                 ah.c[j] = d1 as i32;
                 j += 1;
@@ -214,8 +219,8 @@ mod ntt_tests {
     fn test_ntt_01() {
         let n1 = NTT::from_poly(&Poly::from(&[0u16; N]));
         let n2 = NTT::from_poly(&Poly::from(&[1u16; N]));
-        let r: [i32; N] = n1.add(&n2).inv().coefficients();
-        assert_eq!(r, [1; N]);
+        let r = n1.add(&n2).inv();
+        assert_eq!(r.coeff(), [1; N]);
     }
 
     #[test]
@@ -226,7 +231,7 @@ mod ntt_tests {
         let n2 = NTT::from_poly(&Poly::from(&b));
         let r0 = n1.add(&n2).inv();
         let r1 = std::array::from_fn(|i| modq(a[i] + b[i]));
-        assert_eq!(r0.coefficients(), r1);
+        assert_eq!(r0.coeff(), r1);
     }
 
     #[test]
@@ -247,7 +252,7 @@ mod ntt_tests {
 
         let wh = NTT::from_poly(&Poly::from(&w));
         let _w = wh.inv();
-        assert_eq!(w, _w.coefficients());
+        assert_eq!(w, _w.coeff());
     }
 
     #[test]
