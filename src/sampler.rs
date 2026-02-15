@@ -1,7 +1,6 @@
 use sha3::digest::{ExtendableOutput, Update, XofReader};
 use sha3::{Shake128, Shake128Reader, Shake256, Shake256Reader};
-use crate::field::{FieldElement};
-use crate::params::{ETA1, ETA2, N, RANK};
+use crate::params::{ETA1, ETA2, RANK};
 use crate::prf;
 use crate::ring::Poly;
 
@@ -27,7 +26,6 @@ impl XOF128 {
     }
 }
 
-
 #[allow(unused)]
 impl XOF256 {
     pub fn absorb_finalize(b: &[u8]) -> Self {
@@ -44,13 +42,15 @@ impl XOF256 {
     }
 }
 
-
-#[allow(unused)]
 #[cfg(feature="ML_KEM_512")]
-pub fn sample_poly_cbd_eta1(b: &[u8; 64*3], f: &mut Poly) {
-    sample_poly_cbd_eta_3(b, f)
+fn sample_poly_cbd_eta1(b: &[u8; 64*3], f: &mut Poly) {
+    f.sample_poly_cbd_eta_3(b)
 }
 
+#[cfg(any(feature="ML_KEM_768", feature="ML_KEM_1024"))]
+pub fn sample_poly_cbd_eta1(b: &[u8; 64*2], f: &mut Poly) {
+    f.sample_poly_cbd_eta_2(b)
+}
 
 pub fn sample_secret_eta1(sigma: [u8; 32], n: &mut u8, s: &mut [Poly; RANK]) {
     for i in 0..RANK {
@@ -61,25 +61,16 @@ pub fn sample_secret_eta1(sigma: [u8; 32], n: &mut u8, s: &mut [Poly; RANK]) {
     }
 }
 
-pub fn sample_secret_eta2(rnd: [u8; 32], n: u8, mut s: &mut Poly) {
+pub fn sample_secret_eta2(rnd: [u8; 32], n: u8, s: &mut Poly) {
     let mut prd = [0u8; 64 * ETA2 as usize];
     prf::prf_eta2(&rnd, n, &mut prd);
-    sample_poly_cbd_eta2(&prd, &mut s);
-}
-
-#[allow(unused)]
-#[cfg(any(feature="ML_KEM_768", feature="ML_KEM_1024"))]
-pub fn sample_poly_cbd_eta1(b: &[u8; 64*2], f: &mut Poly) {
-    f.sample_poly_cbd_eta_2(b)
-}
-
-#[allow(unused)]
-pub fn sample_poly_cbd_eta2(b: &[u8; 64*2], f: &mut Poly) {
-    f.sample_poly_cbd_eta_2(b)
+    s.sample_poly_cbd_eta_2(&prd);
 }
 
 
+/*
 #[allow(unused)]
+#[cfg(feature="ML_KEM_512")]
 fn sample_poly_cbd_eta_3(b: &[u8; 64*3], f: &mut Poly) {
     let mut _f = f.coefficients();
     for i in 0..N/4usize {
@@ -92,23 +83,6 @@ fn sample_poly_cbd_eta_3(b: &[u8; 64*3], f: &mut Poly) {
             _f[i * 4 + j] = FieldElement::sub(&FieldElement::from(x as i32), &FieldElement::from(y as i32)).into();
             w >>= 6;
         }
-    }
-}
-
-/*
-#[allow(unused)]
-fn sample_poly_cbd_eta_2(b: &[u8; 64*2], f: &mut Poly) {
-    let mut _f = f.coefficients();
-    for i in (0..N/2) {
-        let w = b[i] & 0xF;
-        let x = (w & 1) + ((w >> 1) & 1);
-        let y = ((w >> 2) & 1) + ((w >> 3) & 1);
-        _f[i*2] = FieldElement::reduce_once(x as i32 - y as i32);
-        let w = b[i] & 0xF0;
-        let x = ((w >> 4) & 1) + ((w >> 5) & 1);
-        let y = ((w >> 6) & 1) + ((w >> 7) & 1);
-        _f[i*2+1] = FieldElement::reduce_once(x as i32 - y as i32);
-        // println!("cbd {}", i*2+1)
     }
 }
 */

@@ -116,9 +116,8 @@ impl Poly {
         Poly::from(&self.c.map(|c| compress::<D>(c as u16)))
     }
 
-    #[allow(unused)]
     pub(crate) fn sample_poly_cbd_eta_2(&mut self, b: &[u8; 64*2]) {
-        for i in (0..N/2) {
+        for i in 0..N/2 {
             let w = b[i] & 0xF;
             let x = (w & 1) + ((w >> 1) & 1);
             let y = ((w >> 2) & 1) + ((w >> 3) & 1);
@@ -127,6 +126,21 @@ impl Poly {
             let x = ((w >> 4) & 1) + ((w >> 5) & 1);
             let y = ((w >> 6) & 1) + ((w >> 7) & 1);
             self.c[i*2+1] = FieldElement::reduce_once(x as i32 - y as i32);
+        }
+    }
+
+    #[cfg(feature="ML_KEM_512")]
+    pub fn sample_poly_cbd_eta_3(&mut self, b: &[u8; 64*3]) {
+        for i in 0..N/4usize {
+            // read 24 bits
+            let mut w: u32 = b[i*3+0] as u32 | ((b[i*3+1] as u32) << 8) | ((b[i*3+2] as u32) << 16);
+            // use 6 bits for each coefficient
+            for j in 0..4 {
+                let x = ((w >> 0) & 1) + ((w >> 1) & 1) + ((w >> 2) & 1);
+                let y = ((w >> 3) & 1) + ((w >> 4) & 1) + ((w >> 5) & 1);
+                self.c[i * 4 + j] = FieldElement::sub(&FieldElement::from(x as i32), &FieldElement::from(y as i32)).into();
+                w >>= 6;
+            }
         }
     }
 }

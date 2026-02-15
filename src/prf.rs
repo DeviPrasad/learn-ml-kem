@@ -32,7 +32,6 @@ pub fn shake256(data: &[u8], hash: &mut [u8; 32]) {
 #[allow(unused)]
 pub fn prf_eta1(s: &[u8], b: u8, hash: &mut [u8; (64 * ETA1) as usize]) {
     assert_eq!(s.len(), 32);
-    assert!(b <= 5);
     let mut d = [0u8; 33];
     d[0..32].copy_from_slice(s);
     d[32] = b;
@@ -53,7 +52,6 @@ pub fn prf_eta1(s: &[u8], b: u8, hash: &mut [u8; (64 * ETA1) as usize]) {
 #[allow(unused)]
 pub fn prf_eta2(s: &[u8], b: u8, hash: &mut [u8; (64 * ETA2) as usize]) {
     assert_eq!(s.len(), 32);
-    assert!(b <= 6);
     let mut d = [0u8; 33];
     d[0..32].copy_from_slice(s);
     d[32] = b;
