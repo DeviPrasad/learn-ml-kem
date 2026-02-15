@@ -2,7 +2,6 @@ use crate::codec::{byte_decode_1, byte_encode};
 use crate::field::{compress, modq, FieldElement};
 use crate::params::{DU, DV, N};
 
-#[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
 pub struct RingElement {
     c: [i32; N],
@@ -13,8 +12,6 @@ impl Default for RingElement {
         Self { c: [0; N] }
     }
 }
-
-
 
 impl From<&[FieldElement; N]> for RingElement {
     fn from(farr: &[FieldElement; N]) -> Self {
@@ -52,28 +49,11 @@ impl Into<[i32; N]> for &RingElement {
     }
 }
 
-#[allow(dead_code)]
 impl RingElement {
     pub fn get(&self, i: usize) -> i32 {
         assert!(i > 0 && i < N);
         self.c[i]
     }
-
-    /*
-    pub fn compress(&self) -> RingElement {
-        let mut r: [u16; N] = [0u16; N];
-        for i in 0..N {
-            #[cfg(any(feature = "ML_KEM_512", feature = "ML_KEM_768"))]
-            {
-                r[i] = field::compress::<10>(self.get(i) as u16);
-            }
-            #[cfg(feature = "ML_KEM_1024")]
-            {
-                r[i] = field::compress::<11>(self.get(i) as u16);
-            }
-        }
-        RingElement::from(&r)
-    }*/
 
     pub fn byte_encode_du(&self) -> [u8; 32*DU as usize] {
         let mut arr = [0; 32*DU as usize];
@@ -95,7 +75,6 @@ impl RingElement {
 }
 
 
-#[allow(dead_code)]
 pub type Poly = RingElement;
 impl Poly {
     pub fn coefficients(&mut self) -> &mut [i32] {

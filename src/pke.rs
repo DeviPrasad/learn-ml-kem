@@ -6,7 +6,6 @@ use crate::ring::Poly;
 use crate::{prf, sampler};
 use crate::decrypt::DecryptionKey;
 
-#[allow(unused)]
 fn gen_rho_sigma(sr: [u8; 33], rho: &mut [u8; 32], sigma: &mut [u8; 32]) {
     let mut pr = [0u8; 64];
     prf::sha3_512(&sr, &mut pr);
@@ -14,7 +13,6 @@ fn gen_rho_sigma(sr: [u8; 33], rho: &mut [u8; 32], sigma: &mut [u8; 32]) {
     sigma.copy_from_slice(&pr[32..]);
 }
 
-#[allow(unused)]
 pub fn key_gen(d: [u8; 32]) -> (EncryptionKey, DecryptionKey, KeyGenState) {
     let sr = {
         let mut sr = [0u8; 33];
@@ -83,6 +81,7 @@ pub fn key_gen(d: [u8; 32]) -> (EncryptionKey, DecryptionKey, KeyGenState) {
 
     let pk = EncryptionKey::new(pke_ek);
     let sk = DecryptionKey::new(pke_sk);
+
     let mut kgs = KeyGenState::default();
     kgs.d = d;
     kgs.rho = rho;

@@ -26,7 +26,6 @@ impl XOF128 {
     }
 }
 
-#[allow(unused)]
 impl XOF256 {
     pub fn absorb_finalize(b: &[u8]) -> Self {
         let mut x = Shake256::default();
@@ -66,23 +65,3 @@ pub fn sample_secret_eta2(rnd: [u8; 32], n: u8, s: &mut Poly) {
     prf::prf_eta2(&rnd, n, &mut prd);
     s.sample_poly_cbd_eta_2(&prd);
 }
-
-
-/*
-#[allow(unused)]
-#[cfg(feature="ML_KEM_512")]
-fn sample_poly_cbd_eta_3(b: &[u8; 64*3], f: &mut Poly) {
-    let mut _f = f.coefficients();
-    for i in 0..N/4usize {
-        // read 24 bits
-        let mut w: u32 = b[i*3+0] as u32 | ((b[i*3+1] as u32) << 8) | ((b[i*3+2] as u32) << 16);
-        // use 6 bits for each coefficient
-        for j in 0..4 {
-            let x = ((w >> 0) & 1) + ((w >> 1) & 1) + ((w >> 2) & 1);
-            let y = ((w >> 3) & 1) + ((w >> 4) & 1) + ((w >> 5) & 1);
-            _f[i * 4 + j] = FieldElement::sub(&FieldElement::from(x as i32), &FieldElement::from(y as i32)).into();
-            w >>= 6;
-        }
-    }
-}
-*/

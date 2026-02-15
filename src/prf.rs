@@ -3,7 +3,6 @@ use sha3::{Digest, Sha3_256, Sha3_512, Shake256};
 use crate::params::{ETA1, ETA2};
 use crate::sampler::XOF256;
 
-#[allow(unused)]
 // G
 pub fn sha3_512(data: &[u8], hash: &mut [u8; 64]) {
     let mut g = Sha3_512::new();
@@ -11,7 +10,6 @@ pub fn sha3_512(data: &[u8], hash: &mut [u8; 64]) {
     hash.copy_from_slice(&g.finalize());
 }
 
-#[allow(unused)]
 // H
 pub fn sha3_256(data: &[u8], hash: &mut [u8; 32]) {
     let mut h = Sha3_256::new();
@@ -19,8 +17,8 @@ pub fn sha3_256(data: &[u8], hash: &mut [u8; 32]) {
     hash.copy_from_slice(&h.finalize());
 }
 
-#[allow(unused)]
 // J
+#[allow(unused)]
 pub fn shake256(data: &[u8], hash: &mut [u8; 32]) {
     let mut j = Shake256::default();
     j.update(data);
@@ -29,7 +27,6 @@ pub fn shake256(data: &[u8], hash: &mut [u8; 32]) {
 }
 
 
-#[allow(unused)]
 pub fn prf_eta1(s: &[u8], b: u8, hash: &mut [u8; (64 * ETA1) as usize]) {
     assert_eq!(s.len(), 32);
     let mut d = [0u8; 33];
@@ -48,8 +45,6 @@ pub fn prf_eta1(s: &[u8], b: u8, hash: &mut [u8; (64 * ETA1) as usize]) {
     }
 }
 
-
-#[allow(unused)]
 pub fn prf_eta2(s: &[u8], b: u8, hash: &mut [u8; (64 * ETA2) as usize]) {
     assert_eq!(s.len(), 32);
     let mut d = [0u8; 33];
