@@ -127,7 +127,7 @@ pub fn byte_encode_12(f: [u16; N], enc: &mut [u8]) {
 }
 
 #[allow(dead_code)]
-fn byte_decode_12(b: &[u8], f: &mut [u16; N]) {
+pub fn byte_decode_12(b: &[u8], f: &mut [u16; N]) {
     assert_eq!(b.len(), 32 * 12);
     for i in 0..N/2 {
         let mut x = 0u32;

@@ -122,7 +122,7 @@ pub fn decompress<const D: u8>(y: u16) -> u16 {
 }
 
 #[allow(dead_code)]
-pub fn decompress_1<const D: u8>(y: u16) -> u16 {
+pub fn decompress_1(y: u16) -> u16 {
     const HALF_Q_UP: u16 = ((Q + 1) / 2) as u16;
     HALF_Q_UP * y
 }

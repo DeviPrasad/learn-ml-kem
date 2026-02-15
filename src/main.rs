@@ -9,6 +9,8 @@ mod ntt;
 mod sampler;
 mod pke;
 mod prf;
+mod encrypt;
+mod decrypt;
 
 fn main() {
     assert!(DU < 12);

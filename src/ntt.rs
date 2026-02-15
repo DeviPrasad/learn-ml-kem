@@ -1,5 +1,5 @@
 use crate::field::{modq, modq_i64};
-use crate::params::{N, Q};
+use crate::params::{N, Q, RANK};
 use crate::ring::Poly;
 use crate::sampler::XOF128;
 
@@ -44,7 +44,7 @@ pub fn bit_rev_7(x: u8) -> usize {
 }
 
 #[allow(unused)]
-#[derive(Clone, Debug, Copy)]
+#[derive(Clone, Debug, Copy, PartialEq)]
 pub struct NTT {
     c: [i32; N],
 }
@@ -58,6 +58,14 @@ impl Default for NTT {
 impl Into<[u16; N]> for NTT {
     fn into(self) -> [u16; N] {
         self.c.map(|x| x as u16)
+    }
+}
+
+impl From<[u16; N]> for NTT {
+    fn from(value: [u16; N]) -> Self {
+        Self {
+            c: value.map(|x| x as i32)
+        }
     }
 }
 
@@ -171,6 +179,18 @@ impl NTT {
 
 #[allow(unused)]
 impl NTT {
+    pub fn sample_ntt_matrix(rho: &[u8; 32], mut ah: &mut [[NTT; RANK]; RANK]) {
+        let mut rho_j_i = [0u8; 34];
+        rho_j_i[0..32].copy_from_slice(rho);
+        for i in 0..RANK {
+            rho_j_i[33] = i as u8;
+            for j in 0..RANK {
+                rho_j_i[32] = j as u8;
+                NTT::sample_ntt(&rho_j_i, &mut ah[i][j]);
+            }
+        }
+    }
+
     // Algorithm 7. SamplerNTT(B)
     #[allow(dead_code)]
     pub fn sample_ntt(b: &[u8; 34], ah: &mut NTT) {
