@@ -12,61 +12,76 @@
 # The Annotated ML KEM Scheme
 ```{=latex}
 \newcommand{\TComment}[1]{\qquad #1}
-\newcommand{\LComment}[1]{\operatorname{---} #1}
+\newcommand{\LComment}[1]{$\blacktriangleright$ #1}
 \newcommand{\plusplus}{\mathbin{\raisebox{0.15ex}{\scalebox{0.85}{$+\mkern-1mu+$}}}}
 \renewcommand{\algorithmicdo}{}
 ```
 
 ## The Annotated Key Generation Algorithm
 ```{=latex}
-% \newcommand{\TComment}[1]{\qquad #1}
 \algtext*{Do}
 \begin{algorithm}
 \caption*{\textbf{Annotated Algorithm 13} $\operatorname{K-PKE.KeyGen}(d: \mathbb{B}^{32}) \rightarrow (ek_{PKE}: \mathbb{B}^{384k+32}, \, dk_{PKE}: \mathbb{B}^{384k}$)}
 \begin{algorithmic}[1]
+
 % line 1
 \State {$(\rho, \sigma) \leftarrow \operatorname{G}(d||k)$}
     {\Comment{expand 32+1 bytes to two pseudorandom 32-byte seeds}}
+    \Statex{\LComment{$\operatorname{G} \doteq \operatorname{SHA3-512}$}}
 
 % line 2
 \State {$N \leftarrow 0$}{}
 
 % lines 3-7
-\For{$i \leftarrow 0; \ i < k; \ i \plusplus$}
-    \For{$j \leftarrow 0; \ j < k; \ j \plusplus$}
-        \State{$\operatorname{A}[i,\, j]\leftarrow \operatorname{SampleNTT}(\rho \, || \, j \, || \, i)$}{}
+\Statex{}
+\Statex \LComment{$\operatorname{A}: \mathbb{T}^{k \times k}_{q}$}
+\For{$(i \leftarrow 0; \ i < k; \ i \plusplus)$}
+    \For{$(j \leftarrow 0; \ j < k; \ j \plusplus)$}
+        \State{$\operatorname{A}[i,\, j] \leftarrow \operatorname{SampleNTT}(\rho \, || \, j \, || \, i)$}{}
     \EndFor
 \EndFor
 
+
 % lines 8-11
-\For{$i \leftarrow 0; \ i < k; \ i \plusplus$}
-    \State{$\operatorname{s}[i] \leftarrow \operatorname{SamplePolyCBD}_{\eta_{1}}(\operatorname{PRF}_{\eta_1}(\sigma, N))$}
+\Statex{}
+\Statex \LComment{$\operatorname{s}: \mathbb{R}^{k}_{\eta_1}$ \ is a vector of $k$ polynomials with coefficients $\in \eta_1$ }
+\Statex \LComment{$\eta_1 = 2 \ for \ \operatorname{ML-KEM-768 \ and \ ML-KEM-1024}$}
+\Statex \LComment{$\eta_1 = 3 \ for \ \operatorname{in ML-KEM-512}$}
+\For{$(i \leftarrow 0; \ i < k; \ i \plusplus)$}
+    \State{$\operatorname{s}[i] \leftarrow \operatorname{SamplePolyCBD}_{\eta_{1}}(\operatorname{PRF}_{\eta_1} (\sigma, N))$}
+    \Comment{$\operatorname{PRF} \doteq \operatorname{SHA3-SHAKE256} $}
     \State{$N \leftarrow N + 1$}
 \EndFor
 
 % lines 12-15
-\For{$i \leftarrow 0; \ i < k; \ i \plusplus$}
+\Statex{}
+\Statex \LComment{$\operatorname{e}: \mathbb{R}^{k}_{\eta_1}$  \ is a vector of $k$ polynomials with coefficients $\in \eta_1 $}
+\For{$(i \leftarrow 0; \ i < k; \ i \plusplus)$}
     \State{$\operatorname{e}[i] \leftarrow \operatorname{SamplePolyCBD}_{\eta_{1}}(\operatorname{PRF}_{\eta_1}(\sigma, N))$}
     \State{$N \leftarrow N + 1$}
 \EndFor
 
 % line 16
-\State{$\hat{\operatorname{s}} \leftarrow \operatorname{NTT}(\operatorname{s})$} {\Comment{run NTT $k$ times (once for each coordinate of s)}}
+\Statex{}
+\State{${\hat{\operatorname{s}}}:\mathbb{T}^{k}_{q} \leftarrow \operatorname{NTT}(\operatorname{s})$} {\Comment{run NTT $k$ times (once for each coordinate of s)}}
 
 % line 17
-\State{$\hat{\operatorname{e}} \leftarrow \operatorname{NTT}(\operatorname{e})$} {\Comment{run NTT $k$ times}}
+\State{${\hat{\operatorname{e}}}:\mathbb{T}^{k}_{q} \leftarrow \operatorname{NTT}(\operatorname{e})$} {\Comment{run NTT $k$ times}}
 
 % line 18
-\State{$\hat{\operatorname{t}} \leftarrow \hat{\operatorname{A}} \circ \hat{\operatorname{s}} + \hat{\operatorname{e}}$} {\Comment{noisy linear system in NTT domain}}
+\State{${\hat{\operatorname{t}}}: \mathbb{T}^{k}_{q} \leftarrow \hat{\operatorname{A}} \circ \hat{\operatorname{s}} + \hat{\operatorname{e}}$} {\Comment{noisy linear system in NTT domain}}
+
+\Statex{}
 
 % line 19
-\State{$\operatorname{ek_{PKE}} \leftarrow \operatorname{ByteEncode_{12}} (\hat{\operatorname{t}}) \, || \, \rho  $}
-    {\Comment{run $\operatorname{ByteEncode_{12}}$ $k$ times, then append $\hat{\operatorname{A}}$-seed }}
+\State{$\operatorname{ek_{PKE}}:\mathbb{B}^{384k+32} \leftarrow \operatorname{ByteEncode_{12}} (\hat{\operatorname{t}}) \, || \, \rho  $}
+    \Statex {\Comment{run $\operatorname{ByteEncode_{12}}$ $k$ times, then append $\hat{\operatorname{A}}$-seed }}
 
 % line 20
-\State{$\operatorname{dk_{PKE}} \leftarrow \operatorname{ByteEncode_{12}}(\hat{\operatorname{s}}) $}{}
+\State{$\operatorname{dk_{PKE}}:\mathbb{B}^{384k} \leftarrow \operatorname{ByteEncode_{12}}(\hat{\operatorname{s}}) $}{}
     {\Comment{run $\operatorname{ByteEncode_{12}}$ $k$ times }}
 
+\Statex{}
 % line 21
 \State{\Return {$(\operatorname{ek_{PKE}, dk_{PKE}})$}}{}
 

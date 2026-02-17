@@ -1,5 +1,4 @@
 use crate::codec::{byte_decode_1, byte_decode_12};
-use crate::field::decompress_1;
 use crate::ntt::NTT;
 use crate::params::{DU, DV, N, RANK};
 use crate::ring::Poly;
@@ -91,8 +90,8 @@ impl EncryptionKey {
 
         let mu: Poly = {
             let mut md = [0u16; N];
-            byte_decode_1(m.as_slice(), &mut md);
-            Poly::from(&md.map(|b| decompress_1(b)))
+            byte_decode_1(&m, &mut md);
+            Poly::from(&md).decompress::<1>()
         };
 
         let prod_th_yh = {

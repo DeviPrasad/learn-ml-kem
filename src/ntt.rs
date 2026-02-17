@@ -63,8 +63,9 @@ impl Into<[u16; N]> for NTT {
 
 impl From<[u16; N]> for NTT {
     fn from(value: [u16; N]) -> Self {
+        let _ = value.map(|v| assert!(v < Q as u16));
         Self {
-            c: value.map(|x| x as i32)
+            c: value.map(|x| x as i32),
         }
     }
 }

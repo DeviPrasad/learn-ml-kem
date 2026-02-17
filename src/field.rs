@@ -12,7 +12,6 @@ pub fn _modq_(x: i32) -> u16 {
     t as u16
 }
 
-
 #[inline(always)]
 pub fn modq(x: i32) -> i32 {
     let _expected = _modq_(x);
@@ -78,7 +77,6 @@ impl From<FieldElement> for u16 {
 }
 
 impl FieldElement {
-
     pub fn reduce_once(a: i32) -> i32 {
         assert_eq!((((a >> 31) & 1) * Q as i32) + a, modq(a));
         (((a >> 31) & 1) * Q as i32) + a
@@ -118,13 +116,23 @@ pub fn decompress<const D: u8>(y: u16) -> u16 {
     let dividend = y as u32 * Q;
     let quotient = dividend >> D;
     // round up to next higher value.
-    (quotient + (dividend >> (D - 1) & 1)) as u16
+    assert!(((quotient + ((dividend >> (D - 1)) & 1)) as u16) < (Q as u16));
+    (quotient + ((dividend >> (D - 1)) & 1)) as u16
 }
 
 #[allow(dead_code)]
 pub fn decompress_1(y: u16) -> u16 {
     const HALF_Q_UP: u16 = ((Q + 1) / 2) as u16;
     HALF_Q_UP * y
+}
+
+#[allow(dead_code)]
+pub fn compress_1(x: u16) -> u16 {
+    assert_eq!(
+        compress::<1>(x),
+        ((((x as u32 * 2) + HALF_Q) / Q) & 1) as u16
+    );
+    compress::<1>(x)
 }
 
 impl FieldElement {
@@ -136,7 +144,6 @@ impl FieldElement {
         FieldElement::from(decompress::<D>(y))
     }
 }
-
 
 #[cfg(test)]
 mod modq_tests {
@@ -150,7 +157,6 @@ mod modq_tests {
         }
     }
 }
-
 
 #[cfg(test)]
 mod compress_tests {
@@ -192,7 +198,8 @@ mod decompress_tests {
         ))]
         {
             for x in 0..Q {
-                let t: u32 = decompress::<DU>(FieldElement::from(x as i32).compress::<DU>().into()).into();
+                let t: u32 =
+                    decompress::<DU>(FieldElement::from(x as i32).compress::<DU>().into()).into();
                 // abs_diff = 3328, y = 3328, t = 0
                 assert!(x.abs_diff(t) <= 2 || Q.abs_diff(x.abs_diff(t)) <= 1);
             }
