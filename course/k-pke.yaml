@@ -1,7 +1,8 @@
 ---
-title: Annotated ML KEM Scheme
-date: March-2026
-lang: "en"
+title: The Annotated ML KEM Scheme
+subtitle: The K-PKE Component of the ML KEM Scheme
+author: Devi Prasad M
+# date: March-2026
 documentclass: article
 papersize: a4
 fontsize: 12pt
@@ -20,7 +21,12 @@ citecolor: NavyBlue
 mainfont: TeX Gyre Pagella
 mathfont: Asana Math
 
+#mainfont: "STIX Two Text"
+#mathfont: "STIX Two Math"
+
 header-includes:
+  - \usepackage{titling}
+  - \setlength{\droptitle}{-3cm}
   - \usepackage{xcolor}
   - \usepackage{amsmath,amscd}
   - \usepackage{caption}
@@ -32,4 +38,5 @@ header-includes:
   # comment fontspec and unicode-math for pdflatex compatibility
   - \usepackage{fontspec}
   - \usepackage{unicode-math}
+  - \input{macros.tex}
 ---

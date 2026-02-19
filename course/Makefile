@@ -1,8 +1,15 @@
-pdf: encrypt-pdf
-	@echo "PDF build complete."
+sampler: sampler.md
+	pandoc sampler.md --log=pandoc.log --defaults=pdf-defaults.yaml --metadata-file=sampler.yaml --syntax-highlighting=tango -o sampler.pdf
+	@echo "sampler.pdf is ready."
+	@open sampler.pdf
 
-encrypt-pdf: pke-encrypt.md pke-encrypt.yaml
-	pandoc pke-encrypt.md --log=pandoc.log --defaults=pdf-defaults.yaml --metadata-file=pke-encrypt.yaml --syntax-highlighting=tango -o encrypt.pdf
+pdf: k-pke-pdf
+	@echo "PDF build complete."
+	@open k-pke.pdf
+
+k-pke-pdf: k-pke.md k-pke.yaml
+	pandoc k-pke.md --log=pandoc.log --defaults=pdf-defaults.yaml --metadata-file=k-pke.yaml --syntax-highlighting=tango -o k-pke.pdf
+
 
 clean:
 	rm -f *.html
