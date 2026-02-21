@@ -3,13 +3,10 @@ sampler: sampler.md
 	@echo "sampler.pdf is ready."
 	@open sampler.pdf
 
-pdf: k-pke-pdf
-	@echo "PDF build complete."
-	@open k-pke.pdf
-
-k-pke-pdf: k-pke.md k-pke.yaml
+k-pke: k-pke.md k-pke.yaml
 	pandoc k-pke.md --log=pandoc.log --defaults=pdf-defaults.yaml --metadata-file=k-pke.yaml --syntax-highlighting=tango -o k-pke.pdf
-
+	@echo "k-pke.pdf is ready."
+	@open k-pke.pdf
 
 clean:
 	rm -f *.html

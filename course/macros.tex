@@ -1,9 +1,21 @@
 \newcommand{\TComment}[1]{\qquad #1}
 \newcommand{\LComment}[1]{$\triangleright$ {#1}}
+
+\newcommand{\is}{\leftarrow}
+\newcommand{\Param}[1]{\ensuremath{\mathit{#1}}}
+\newcommand{\Mod}[1]{\ensuremath{\ \mathrm{mod} \ {#1}}}
+\newcommand{\BitsToBytes}{\operatorname{BitsToBytes}}
+\newcommand{\BytesToBits}{\operatorname{BytesToBits}}
+
 \newcommand{\plusplus}{\mathbin{\raisebox{0.15ex}{\scalebox{0.85}{$+\mkern-1mu+$}}}}
 \newcommand{\T}{\ensuremath{\raisebox{-0.7ex}{\scalebox{0.65}{\intercal}}}}
 
+\newcommand{\ZTwoPowD}{\ensuremath{\mathbb{Z}_{2^d}}}
+\newcommand{\Zq}{\ensuremath{\mathbb{Z}_{q}}}
+\newcommand{\Zm}{\ensuremath{\mathbb{Z}_{m}}}
+
 \newcommand{\RingZq}{\mathbin{\mathbb{Z}_{q}^{256}}}
+\newcommand{\RingZm}{\mathbin{\mathbb{Z}_{m}^{256}}}
 \newcommand{\RingTq}{\mathbin{\mathbb{T}_{q}^{256}}}
 \newcommand{\RingTqKxK}{\mathbin{\mathbb{T}_{q}^{k \times k}}}
 \newcommand{\RingZqK}{\mathbin{(\mathbb{Z}_{q}^{256})^{k}}}
@@ -13,16 +25,16 @@
 \newcommand{\EKPKE}{\mathbin{\operatorname{ek_{PKE}}}}
 \newcommand{\DKPKE}{\mathbin{\operatorname{dk_{PKE}}}}
 
-\newcommand{\Name}[1]{\mathbin{\operatorname{ #1 }}}
+\newcommand{\Name}[1]{\operatorname{ #1 }}
 \newcommand{\NameBold}[1]{\mathbin{\operatorname{\mathbf{ #1 }}}}
 \newcommand{\HatName}[1]{\mathbin{\widehat{\operatorname{ #1 }}}}
 \newcommand{\HatNameBold}[1]{\mathbin{\widehat{\operatorname{\mathbf{ #1 }}}}}
 
 \newcommand{\HatA}{\widehat{\operatorname{\mathbf{A}}}}
 \newcommand{\HatBoldT}{\widehat{\operatorname{\mathbf{\;\!t\;\!}}}}
-\newcommand{\HatBoldS}{\widehat{\operatorname{\mathbf{s}}}}
+\newcommand{\HatBoldS}{\widehat{\operatorname{\mathbf{\;\!s\;\!}}}}
 \newcommand{\BoldY}{\mathbf{y}}
-\newcommand{\HatBoldY}{\widehat{\mathbf{y}}}
+\newcommand{\HatBoldY}{\widehat{\mathbf{\;\!y\;\!}}}
 
 \newcommand{\SampleNTT}{\Name{SampleNTT}}
 \newcommand{\SamplePolyCbdEtaOne}{\Name{SamplePolyCBD}_{\eta_1}}
