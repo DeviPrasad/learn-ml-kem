@@ -137,7 +137,7 @@ pub fn byte_decode_12(b: &[u8], f: &mut [u16; N]) {
     }
 }
 
-#[allow(dead_code)]
+#[allow(unused)]
 fn byte_encode_11(f: [u16; N], enc: &mut [u8]) {
     for i in 0..N / 8 {
         let mut x: u128 = 0;
@@ -226,7 +226,7 @@ fn byte_decode_10(b: &[u8], f: &mut [u16; N]) {
 
 #[allow(dead_code)]
 fn byte_encode_5(f: [u16; N], enc: &mut [u8]) {
-    assert!(enc.len() >= 32 * 5);
+    assert_eq!(enc.len(), 32 * 5);
     for i in 0..N / 8 {
         let mut x: u64 = 0;
         x |= f[i * 8 + 0] as u64 & 0x1F;
@@ -255,9 +255,9 @@ fn byte_encode_5(f: [u16; N], enc: &mut [u8]) {
       7     6    5     4      3    2     1    0
         decoded field elements - u16 elements
 */
-#[allow(dead_code)]
+#[allow(unused)]
 fn byte_decode_5(b: &[u8], f: &mut [u16; N]) {
-    assert!(b.len() >= 32 * 5);
+    assert_eq!(b.len(), 32 * 5);
     for i in 0..N / 8 {
         f[i * 8 + 0] = (b[i * 5 + 0] & 0b0001_1111) as u16;
         f[i * 8 + 1] =
@@ -318,7 +318,7 @@ pub fn byte_decode_1(b: &[u8], f: &mut [u16; N]) {
 
 #[allow(dead_code)]
 pub fn byte_encode(f: [u16; N], enc: &mut [u8], d: u8) {
-    assert!(enc.len() >= 32 * d as usize);
+    assert_eq!(enc.len(), 32 * d as usize);
     match d {
         1 => byte_encode_1(f, enc),
         4 => byte_encode_4(f, enc),

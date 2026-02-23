@@ -1,5 +1,5 @@
 use crate::field::{modq, modq_i64};
-use crate::params::{N, Q, RANK};
+use crate::params::{N, Q, QI32, RANK};
 use crate::ring::Poly;
 use crate::sampler::XOF128;
 
@@ -72,18 +72,17 @@ impl From<[u16; N]> for NTT {
 
 #[allow(unused)]
 fn pow_mod_q(n: i32, exp: u8) -> i32 {
-    const Q32: i32 = Q as i32;
     let mut result = 1i32;
     let mut exp = exp;
     let mut num = n;
     while exp > 0 {
         if exp & 1 == 1 {
-            let _dbg_res = (result * num) % Q32;
+            let _dbg_res = (result * num) % QI32;
             result = modq(result * num);
             assert_eq!(_dbg_res, result);
         }
         exp >>= 1;
-        let _dbg_res = (num * num) % Q32;
+        let _dbg_res = (num * num) % QI32;
         num = modq(num * num);
         assert_eq!(_dbg_res, num);
     }
@@ -131,14 +130,14 @@ impl NTT {
             len *= 2;
         }
 
-        Poly::from(&f.map(|x| modq(x * 3303)))
+        Poly::from(&f.map(|x| modq(modq(x * 3303))))
     }
 
     pub fn add(&self, that: &NTT) -> Self {
         let fh = self.c;
         let th = that.c;
         NTT {
-            c: std::array::from_fn(|i| modq((fh[i] + th[i]))),
+            c: std::array::from_fn(|i| modq(modq((fh[i] + th[i])))),
         }
     }
 
@@ -146,7 +145,7 @@ impl NTT {
         let fh = self.c;
         let th = that.c;
         NTT {
-            c: std::array::from_fn(|i| modq((fh[i] - th[i]))),
+            c: std::array::from_fn(|i| modq(modq((fh[i] - th[i])))),
         }
     }
 
@@ -170,7 +169,7 @@ impl NTT {
     pub fn base_case_multiply(a0: i32, a1: i32, b0: i32, b1: i32, gamma: i32) -> (i32, i32) {
         let c0 = modq_i64((a0 as i64 * b0 as i64 + a1 as i64 * b1 as i64 * gamma as i64));
         let c1 = modq_i64((a0 as i64 * b1 as i64 + a1 as i64 * b0 as i64));
-        (c0, c1)
+        (modq(c0), modq(c1))
     }
 
     pub fn coefficients(&self) -> [i32; N] {
@@ -218,7 +217,7 @@ impl NTT {
 
 #[cfg(test)]
 mod ntt_tests {
-    use crate::field::modq;
+    use crate::field::{modq, modq_i64};
     use crate::ntt::{bit_rev_7, pow_mod_q, MOD_ROOTS, NTT, NTT_ROOTS};
     use crate::params::{N, Q};
     use crate::ring::Poly;
@@ -246,12 +245,12 @@ mod ntt_tests {
 
     #[test]
     fn test_ntt_add_01() {
-        let a: [i32; N] = std::array::from_fn(|_| modq(getrandom::u32().unwrap() as i32));
-        let b: [i32; N] = std::array::from_fn(|_| modq(getrandom::u32().unwrap() as i32));
+        let a: [i32; N] = std::array::from_fn(|_| modq_i64(getrandom::u32().unwrap() as i64));
+        let b: [i32; N] = std::array::from_fn(|_| modq_i64(getrandom::u32().unwrap() as i64));
         let n1 = NTT::from_poly(&Poly::from(&a));
         let n2 = NTT::from_poly(&Poly::from(&b));
         let r0 = n1.add(&n2).inv();
-        let r1 = std::array::from_fn(|i| modq(a[i] + b[i]));
+        let r1 = std::array::from_fn(|i| modq(modq(a[i]) + b[i]));
         assert_eq!(r0.coeff(), r1);
     }
 

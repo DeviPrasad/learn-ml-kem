@@ -1,6 +1,6 @@
 use crate::codec::{byte_decode_1, byte_encode};
 use crate::field::{compress, compress_1, decompress, modq, FieldElement};
-use crate::params::{DU, DV, N, Q};
+use crate::params::{DU, DV, N, Q, QI32};
 
 #[derive(Clone, Copy, Debug)]
 pub struct RingElement {
@@ -25,7 +25,7 @@ impl From<&[u16; N]> for RingElement {
     fn from(farr: &[u16; N]) -> Self {
         let _ = farr.map(|v| assert!(v < Q as u16));
         Self {
-            c: farr.map(|e| modq(i32::from(e))),
+            c: farr.map(|e| i32::from(e)),
         }
     }
 }
@@ -33,7 +33,7 @@ impl From<&[u16; N]> for RingElement {
 impl Into<[u16; N]> for &RingElement {
     fn into(self) -> [u16; N] {
         self.c.map(|e| {
-            assert!(e < Q as i32);
+            assert!(e < QI32);
             e as u16
         })
     }
@@ -42,7 +42,7 @@ impl Into<[u16; N]> for &RingElement {
 impl From<&[i32; N]> for RingElement {
     fn from(farr: &[i32; N]) -> Self {
         Self {
-            c: farr.map(|e| modq(e)),
+            c: farr.map(|e| modq(modq(e))),
         }
     }
 }

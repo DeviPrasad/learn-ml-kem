@@ -1,14 +1,15 @@
-use crate::params::{BARRETT_MULTIPLIER, BARRETT_SHIFT, HALF_Q, Q};
+use crate::params::{BARRETT_MULTIPLIER_24, BARRETT_MULTIPLIER_32, BARRETT_SHIFT_24, BARRETT_SHIFT_32, HALF_Q, Q, QI32, QI64};
 
 #[inline(always)]
 pub fn _modq_(x: i32) -> u16 {
     let x = x as i64;
-    let mut t = (x - (((x * 5039) >> 24) * 3329)) as i32;
+    let mut t = (x - (((x * BARRETT_MULTIPLIER_24) >> BARRETT_SHIFT_24) * QI64)) as i32;
 
     // Ensure t is in [0, 2*Q)
-    t += (t >> 31) & 3329;
+    t += (t >> 31) & QI32;
     // Reduce from [0, 2*Q) to [0, Q)
-    t -= ((t >= 3329) as i32) * 3329;
+    t -= (t >= QI32) as i32 * QI32;
+    assert!(t as u16 <= Q as u16);
     t as u16
 }
 
@@ -16,12 +17,12 @@ pub fn _modq_(x: i32) -> u16 {
 pub fn modq(x: i32) -> i32 {
     let _expected = _modq_(x);
     let x = x as i64;
-    let t = (x - (((x * 5039) >> 24) * 3329)) as i32;
+    let t = (x - (((x * BARRETT_MULTIPLIER_32) >> BARRETT_SHIFT_32) * QI64)) as i32;
 
     let t = if t < 0 {
-        (t + 3329) as u16
-    } else if t >= 3329 {
-        (t - 3329) as u16
+        (t + QI32) as u16
+    } else if t >= QI32 {
+        (t - QI32) as u16
     } else {
         t as u16
     };
@@ -32,18 +33,14 @@ pub fn modq(x: i32) -> i32 {
 
 #[inline(always)]
 pub fn modq_i64(x: i64) -> i32 {
-    // Barrett reduction with k = 24
-    // t = x - floor(x * 5039 / 2^24) * 3329
-    let t = x - (((x * 5039) >> 24) * 3329);
+    let qh = (x * BARRETT_MULTIPLIER_32) >> BARRETT_SHIFT_32;
+    let mut t = x - qh * QI64;
 
-    // Final conditional subtraction
-    let mut r = t as i32;
-    if r < 0 {
-        r += 3329;
-    } else if r >= 3329 {
-        r -= 3329;
-    }
-    r
+    // single correction is enough for ML-KEM bounds
+    t -= ((t >= QI64) as i64) * QI64;
+    t += ((t < 0) as i64) * QI64;
+
+    t as i32
 }
 
 #[derive(Clone, Copy, Default)]
@@ -79,7 +76,7 @@ impl From<FieldElement> for u16 {
 impl FieldElement {
     pub fn reduce_once(a: i32) -> i32 {
         assert_eq!((((a >> 31) & 1) * Q as i32) + a, modq(a));
-        (((a >> 31) & 1) * Q as i32) + a
+        (((a >> 31) & 1) * QI32) + a
     }
 
     pub fn add(a: &Self, b: &Self) -> Self {
@@ -93,35 +90,37 @@ impl FieldElement {
 
 // maps a field element uniformly to the range 0 to 2ᵈ-1 per FIPS 203, Def 4.7.
 pub fn compress<const D: u8>(x: u16) -> u16 {
-    let x: u32 = x as u32;
+    assert!(D < 12);
+    let x = x as u32;
     assert!(x < Q);
-    let dividend = x << D;
-    let quotient = (((dividend as u64) * BARRETT_MULTIPLIER) >> BARRETT_SHIFT) as u32;
-    let rem = dividend - (quotient * Q);
 
-    // If x < q, the remainder is in the range [0, q+q/2), not [0, q).
-    // [ q/2, q+q/2 ) -> round to 1
-    assert!(rem < HALF_Q || rem < Q + HALF_Q);
-    let f = (rem >= HALF_Q) as u32;
-    assert!(quotient <= (1 << D) - 1); // [0, 2^d-1]
-    let t = quotient + f;
-    assert!(t <= (1 << D)); // [0, 2^d]
-    // when when D = 10, after rouding up 't', maintain it in [0, 2^d-1]
+    // a = x*2^d + q/2   (spec rounding)
+    let a = (x << D) + (Q >> 1);
+
+    // Barrett approximate division
+    let t = ((a as u64 * 1290167) >> 32) as u32;
+
+    // One correction (branchless)
+    let r = a - t * Q;
+    let t = t + ((r >= Q) as u32);
+
+    assert_eq!(t & ((1 << D) - 1), (((x << D) + Q/2) / Q) & ((1 << D) - 1));
     (t & ((1 << D) - 1)) as u16
 }
 
-#[allow(dead_code)]
+
+#[allow(unused)]
 pub fn decompress<const D: u8>(y: u16) -> u16 {
+    assert!(D < 12);
     assert!(y < (1 << D));
-    let dividend = y as u32 * Q;
-    let quotient = dividend >> D;
-    // round up to next higher value.
-    assert!(((quotient + ((dividend >> (D - 1)) & 1)) as u16) < (Q as u16));
-    (quotient + ((dividend >> (D - 1)) & 1)) as u16
+
+    let t = (y as u32) * Q + (1 << (D - 1));
+    (t >> D) as u16
 }
 
 #[allow(dead_code)]
 pub fn decompress_1(y: u16) -> u16 {
+    assert!(y < Q as u16);
     const HALF_Q_UP: u16 = ((Q + 1) / 2) as u16;
     HALF_Q_UP * y
 }
