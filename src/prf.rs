@@ -26,39 +26,19 @@ pub fn shake256(data: &[u8], hash: &mut [u8; 32]) {
     r.read(hash);
 }
 
-
-pub fn prf_eta1(s: &[u8], b: u8, hash: &mut [u8; (64 * ETA1) as usize]) {
+pub fn _prf_eta_(s: &[u8], b: u8, hash: &mut [u8]) {
     assert_eq!(s.len(), 32);
     let mut d = [0u8; 33];
     d[0..32].copy_from_slice(s);
     d[32] = b;
     let mut xof = XOF256::absorb_finalize(&d);
     xof.squeeze(hash);
-    {
-        let _hash_= &mut[0u8; (64 * ETA1) as usize];
-        let mut hasher = Shake256::default();
-        hasher.update(s);
-        hasher.update(&[b]);
-        let mut r = hasher.finalize_xof();
-        r.read(_hash_);
-        assert_eq!(hash, _hash_);
-    }
+}
+
+pub fn prf_eta1(s: &[u8], b: u8, hash: &mut [u8; (64 * ETA1) as usize]) {
+    _prf_eta_(s, b, hash)
 }
 
 pub fn prf_eta2(s: &[u8], b: u8, hash: &mut [u8; (64 * ETA2) as usize]) {
-    assert_eq!(s.len(), 32);
-    let mut d = [0u8; 33];
-    d[0..32].copy_from_slice(s);
-    d[32] = b;
-    let mut xof = XOF256::absorb_finalize(&d);
-    xof.squeeze(hash);
-    {
-        let _hash_= &mut[0u8; (64 * ETA2) as usize];
-        let mut hasher = Shake256::default();
-        hasher.update(s);
-        hasher.update(&[b]);
-        let mut r = hasher.finalize_xof();
-        r.read(_hash_);
-        assert_eq!(hash, _hash_);
-    }
+    _prf_eta_(s, b, hash)
 }

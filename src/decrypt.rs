@@ -66,6 +66,7 @@ impl DecryptionKey {
 }
 
 #[cfg(test)]
+#[cfg(feature = "ML_KEM_768")]
 mod mlkem768_cpa_decrypt_tests {
     use crate::params::{DU, DV, RANK};
     use crate::{pke, prf};

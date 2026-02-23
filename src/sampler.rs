@@ -35,7 +35,6 @@ impl XOF256 {
         }
     }
 
-
     pub fn squeeze(&mut self, mut buf: &mut [u8]) {
         self.r.read(&mut buf);
     }

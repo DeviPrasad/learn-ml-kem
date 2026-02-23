@@ -197,7 +197,7 @@ impl NTT {
     pub fn sample_ntt(b: &[u8; 34], ah: &mut NTT) {
         let mut xr = XOF128::absorb_finalize(b);
         let mut j = 0;
-        while j < 256 {
+        while j < N {
             let mut c = [0u8; 3];
             xr.squeeze(&mut c);
             let d1 = (c[0] as u16) + (((c[1] & 0xF) as u16) << 8);
@@ -208,7 +208,7 @@ impl NTT {
                 ah.c[j] = d1 as i32;
                 j += 1;
             }
-            if d2 < Q as u16 && j < 256 {
+            if d2 < Q as u16 && j < N {
                 ah.c[j] = d2 as i32;
                 j += 1;
             }
