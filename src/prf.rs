@@ -11,6 +11,7 @@ pub fn sha3_512(data: &[u8], hash: &mut [u8; 64]) {
 }
 
 // H
+#[allow(unused)]
 pub fn sha3_256(data: &[u8], hash: &mut [u8; 32]) {
     let mut h = Sha3_256::new();
     Digest::update(&mut h, data);

@@ -17,6 +17,7 @@ pub struct KeyGenState {
     pub(crate) ah: [[NTT; RANK]; RANK],
 }
 
+#[allow(unused)]
 impl EncryptionKey {
     // pub fn new(key: [u8; 384 * RANK + 32], seed: [u8; 32], rho: [u8; 32], sigma: [u8; 32], ah: [[NTT; RANK]; RANK]) -> Self {
     pub fn new(key: [u8; 384 * RANK + 32]) -> Self {

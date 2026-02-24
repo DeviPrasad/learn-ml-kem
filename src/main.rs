@@ -1,5 +1,4 @@
-use crate::field::FieldElement;
-use crate::params::{DU, Q};
+use crate::params::{DU, DV, RANK};
 
 mod codec;
 mod decrypt;
@@ -13,11 +12,10 @@ mod ring;
 mod sampler;
 
 fn main() {
-    assert!(DU < 12);
-    for x in 0..Q {
-        let t = FieldElement::from(x as i32).compress::<DU>();
-        assert!(u16::from(t) <= (1 << DU) - 1)
-    }
+    let (pk, dk, _) = pke::key_gen([0u8; 32]);
+    let c: [u8; 32 * (DU * RANK as u8 + DV) as usize] = pk.encrypt([128u8; 32], [1u8; 32]);
+    let m = dk.decrypt(c);
+    assert_eq!(m, [128u8; 32]);
 }
 
 #[cfg(test)]

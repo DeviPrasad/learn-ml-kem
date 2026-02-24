@@ -4,6 +4,7 @@ pub const QI64: i64 = Q as i64;
 
 pub const N: usize = 256; // ML-KEM prime. 2^8 * 13 + 1
 pub const HALF_Q: u32 = 1664; // ML-KEM prime. 2^8 * 13 + 1
+pub const HALF_Q_UP: u16 = ((Q + 1)/2) as u16;
 pub const BARRETT_MULTIPLIER_24: i64 = 5039; // 2^12 * 2^12 / q
 pub const BARRETT_MULTIPLIER_32: i64 = 1290167; // 2^32 / q
 pub const BARRETT_SHIFT_24: u64 = 24; // log₂(2^24)
