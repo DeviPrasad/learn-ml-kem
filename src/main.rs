@@ -29,18 +29,24 @@ mod tests {
     use std::path::Path;
 
     #[cfg(test)]
-    pub fn read_kat_file<P: AsRef<Path>>(
-        path: P,
-        kat_d: &mut Vec<Vec<u8>>,
-        kat_pk: &mut Vec<Vec<u8>>,
-        kat_sk: &mut Vec<Vec<u8>>,
-        kat_m: &mut Vec<Vec<u8>>,
-        kat_ct: &mut Vec<Vec<u8>>,
-        kat_ss: &mut Vec<Vec<u8>>,
-    ) -> std::io::Result<()> {
+    pub fn _read_kat_file_(
+        path: &Path,
+    ) -> std::io::Result<(
+        Vec<Vec<u8>>,
+        Vec<Vec<u8>>,
+        Vec<Vec<u8>>,
+        Vec<Vec<u8>>,
+        Vec<Vec<u8>>,
+        Vec<Vec<u8>>,
+    )> {
         let file = File::open(path)?;
         let reader = BufReader::new(file);
-
+        let mut kat_d: Vec<Vec<u8>> = Vec::new();
+        let mut kat_pk: Vec<Vec<u8>> = Vec::new();
+        let mut kat_sk: Vec<Vec<u8>> = Vec::new();
+        let mut kat_m: Vec<Vec<u8>> = Vec::new();
+        let mut kat_ct: Vec<Vec<u8>> = Vec::new();
+        let mut kat_ss: Vec<Vec<u8>> = Vec::new();
         for line in reader.lines() {
             let line = line?;
             let line = line.trim();
@@ -63,178 +69,67 @@ mod tests {
                 _ => {}
             }
         }
+        Ok((kat_d, kat_pk, kat_sk, kat_m, kat_ct, kat_ss))
+    }
 
-        Ok(())
+
+    #[cfg(test)]
+    fn _run_kats_(kat_file: &Path) {
+        let (d, kat_pk, kat_sk, kat_m, kat_ct, kat_ss) =
+            _read_kat_file_(kat_file).unwrap();
+
+        for i in 0..d.len() {
+            let dv: [u8; 32] = d[i].as_slice().try_into().unwrap();
+            let exp_pk = &kat_pk[i];
+            let (pk, dk, _) = pke::key_gen(dv);
+            assert_eq!(pk.key_bytes(), exp_pk);
+            let exp_sk = &kat_sk[i];
+            assert_eq!(dk.key_bytes(), &exp_sk[0..384 * RANK]);
+
+            let mut hash_ek = [0u8; 32];
+            prf::sha3_256(&pk.key_bytes(), &mut hash_ek); // H(ek)
+
+            let mut m_h_ek: [u8; 64] = [0u8; 64];
+            let m: [u8; 32] = kat_m[i].as_slice().try_into().unwrap();
+            m_h_ek[0..32].copy_from_slice(&m);
+            m_h_ek[32..].copy_from_slice(&hash_ek);
+
+            let mut hash = [0u8; 64];
+            prf::sha3_512(&m_h_ek, &mut hash); // G(m||H(ek))
+            let r: [u8; 32] = hash[32..].try_into().unwrap();
+
+            let ct = pk.encrypt(m.into(), r);
+            let exp_ct: [u8; 32usize * (DU as usize * RANK + DV as usize)] =
+                kat_ct[i].as_slice().try_into().unwrap();
+            assert_eq!(ct, exp_ct);
+
+            let ss: [u8; 32] = hash[0..32].try_into().unwrap();
+            let exp_ss: [u8; 32] = kat_ss[i].as_slice().try_into().unwrap();
+            assert_eq!(ss, exp_ss);
+
+            let md = dk.decrypt(exp_ct);
+            assert_eq!(md, m);
+            let ct_dash = pk.encrypt(md.into(), r);
+            assert_eq!(ct_dash.len(), ct.len());
+            assert_eq!(ct_dash, ct);
+        }
     }
 
     #[cfg(feature = "ML_KEM_512")]
     #[test]
     fn mlkem512_run_nist_kats() {
-        let mut d: Vec<Vec<u8>> = Vec::new();
-        let mut pk: Vec<Vec<u8>> = Vec::new();
-        let mut sk: Vec<Vec<u8>> = Vec::new();
-        let mut kat_m: Vec<Vec<u8>> = Vec::new();
-        let mut exp_ct: Vec<Vec<u8>> = Vec::new();
-        let mut exp_ss: Vec<Vec<u8>> = Vec::new();
-        read_kat_file(
-            "nist-kats/ml_kem_512.kat",
-            &mut d,
-            &mut pk,
-            &mut sk,
-            &mut kat_m,
-            &mut exp_ct,
-            &mut exp_ss,
-        )
-        .unwrap();
-
-        for i in 0..d.len() {
-            let dv: [u8; 32] = d[i].as_slice().try_into().unwrap();
-            let exp_pk: [u8; 800] = pk[i].as_slice().try_into().unwrap();
-            let exp_sk: [u8; 1632] = sk[i].as_slice().try_into().unwrap();
-            let (pk, dk, _) = pke::key_gen(dv);
-            assert_eq!(pk.key_bytes(), exp_pk);
-
-            assert_eq!(dk.key_bytes(), &exp_sk[0..384 * RANK]);
-            let m: [u8; 32] = kat_m[i].as_slice().try_into().unwrap();
-
-            let mut hash_ek = [0u8; 32];
-            prf::sha3_256(&pk.key_bytes(), &mut hash_ek); // H(ek)
-            let mut m_h_ek: [u8; 64] = [0u8; 64];
-            m_h_ek[0..32].copy_from_slice(&m);
-            m_h_ek[32..].copy_from_slice(&hash_ek);
-
-            let mut hash = [0u8; 64];
-            prf::sha3_512(&m_h_ek, &mut hash); // G(m||H(ek))
-            let r: [u8; 32] = hash[32..].try_into().unwrap();
-
-            let ct = pk.encrypt(m.into(), r);
-            let _ct: [u8; 32usize * (DU as usize * RANK + DV as usize)] =
-                exp_ct[i].as_slice().try_into().unwrap();
-            assert_eq!(ct, _ct, "kat index {i}");
-
-            let ss: [u8; 32] = hash[0..32].try_into().unwrap();
-            let _ss: [u8; 32] = exp_ss[i].as_slice().try_into().unwrap();
-            assert_eq!(ss, _ss);
-
-            let md = dk.decrypt(_ct);
-            assert_eq!(md, m);
-            let ct_dash = pk.encrypt(md.into(), r);
-            assert_eq!(ct_dash.len(), ct.len());
-            assert_eq!(ct_dash, ct);
-        }
+        _run_kats_("nist-kats/ml_kem_512.kat".as_ref())
     }
 
     #[cfg(feature = "ML_KEM_1024")]
     #[test]
     fn mlkem1024_run_nist_kats() {
-        let mut d: Vec<Vec<u8>> = Vec::new();
-        let mut pk: Vec<Vec<u8>> = Vec::new();
-        let mut sk: Vec<Vec<u8>> = Vec::new();
-        let mut kat_m: Vec<Vec<u8>> = Vec::new();
-        let mut exp_ct: Vec<Vec<u8>> = Vec::new();
-        let mut exp_ss: Vec<Vec<u8>> = Vec::new();
-        read_kat_file(
-            "nist-kats/ml_kem_1024.kat",
-            &mut d,
-            &mut pk,
-            &mut sk,
-            &mut kat_m,
-            &mut exp_ct,
-            &mut exp_ss,
-        )
-        .unwrap();
-
-        for i in 0..d.len() {
-            let dv: [u8; 32] = d[i].as_slice().try_into().unwrap();
-            let exp_pk: [u8; 1568] = pk[i].as_slice().try_into().unwrap();
-            let exp_sk: [u8; 3168] = sk[i].as_slice().try_into().unwrap();
-            let (pk, dk, _) = pke::key_gen(dv);
-            assert_eq!(pk.key_bytes(), exp_pk);
-
-            assert_eq!(dk.key_bytes(), &exp_sk[0..384 * RANK]);
-            let m: [u8; 32] = kat_m[i].as_slice().try_into().unwrap();
-
-            let mut hash_ek = [0u8; 32];
-            prf::sha3_256(&pk.key_bytes(), &mut hash_ek); // H(ek)
-            let mut m_h_ek: [u8; 64] = [0u8; 64];
-            m_h_ek[0..32].copy_from_slice(&m);
-            m_h_ek[32..].copy_from_slice(&hash_ek);
-
-            let mut hash = [0u8; 64];
-            prf::sha3_512(&m_h_ek, &mut hash); // G(m||H(ek))
-            let r: [u8; 32] = hash[32..].try_into().unwrap();
-
-            let ct = pk.encrypt(m.into(), r);
-            let _ct: [u8; 32usize * (DU as usize * RANK + DV as usize)] =
-                exp_ct[i].as_slice().try_into().unwrap();
-            assert_eq!(ct, _ct);
-
-            let ss: [u8; 32] = hash[0..32].try_into().unwrap();
-            let _ss: [u8; 32] = exp_ss[i].as_slice().try_into().unwrap();
-            assert_eq!(ss, _ss);
-
-            let md = dk.decrypt(_ct);
-            assert_eq!(md, m);
-            let ct_dash = pk.encrypt(md.into(), r);
-            assert_eq!(ct_dash.len(), ct.len());
-            assert_eq!(ct_dash, ct);
-        }
+        _run_kats_("nist-kats/ml_kem_1024.kat".as_ref())
     }
 
     #[cfg(feature = "ML_KEM_768")]
     #[test]
     fn mlkem768_run_nist_kats() {
-        let mut d: Vec<Vec<u8>> = Vec::new();
-        let mut pk: Vec<Vec<u8>> = Vec::new();
-        let mut sk: Vec<Vec<u8>> = Vec::new();
-        let mut kat_m: Vec<Vec<u8>> = Vec::new();
-        let mut exp_ct: Vec<Vec<u8>> = Vec::new();
-        let mut exp_ss: Vec<Vec<u8>> = Vec::new();
-        read_kat_file(
-            "nist-kats/ml_kem_768.kat",
-            &mut d,
-            &mut pk,
-            &mut sk,
-            &mut kat_m,
-            &mut exp_ct,
-            &mut exp_ss,
-        )
-        .unwrap();
-
-        for i in 0..d.len() {
-            let dv: [u8; 32] = d[i].as_slice().try_into().unwrap();
-            let exp_pk: [u8; 1184] = pk[i].as_slice().try_into().unwrap();
-            let exp_sk: [u8; 2400] = sk[i].as_slice().try_into().unwrap();
-            let (pk, dk, _) = pke::key_gen(dv);
-            assert_eq!(pk.key_bytes(), exp_pk);
-
-            assert_eq!(dk.key_bytes(), &exp_sk[0..384 * RANK]);
-            let m: [u8; 32] = kat_m[i].as_slice().try_into().unwrap();
-
-            let mut hash_ek = [0u8; 32];
-            prf::sha3_256(&pk.key_bytes(), &mut hash_ek); // H(ek)
-            let mut m_h_ek: [u8; 64] = [0u8; 64];
-            m_h_ek[0..32].copy_from_slice(&m);
-            m_h_ek[32..].copy_from_slice(&hash_ek);
-
-            let mut hash = [0u8; 64];
-            prf::sha3_512(&m_h_ek, &mut hash); // G(m||H(ek))
-            let r: [u8; 32] = hash[32..].try_into().unwrap();
-
-            let ct = pk.encrypt(m.into(), r);
-            let _ct: [u8; 32usize * (DU as usize * RANK + DV as usize)] =
-                exp_ct[i].as_slice().try_into().unwrap();
-            assert_eq!(ct, _ct);
-
-            let ss: [u8; 32] = hash[0..32].try_into().unwrap();
-            let _ss: [u8; 32] = exp_ss[i].as_slice().try_into().unwrap();
-            assert_eq!(ss, _ss);
-
-            let md = dk.decrypt(_ct);
-            assert_eq!(md, m);
-            let ct_dash = pk.encrypt(md.into(), r);
-            assert_eq!(ct_dash.len(), ct.len());
-            assert_eq!(ct_dash, ct);
-        }
+        _run_kats_("nist-kats/ml_kem_768.kat".as_ref())
     }
 }
