@@ -133,7 +133,7 @@ pub fn compress_1(x: u16) -> u16 {
         compress::<1>(x),
         ((((x as u32 * 2) + HALF_Q) / Q) & 1) as u16
     );
-    ((((x as u32 * 2) + HALF_Q) / Q) & 1) as u16
+    compress::<1>(x)
 }
 
 impl FieldElement {

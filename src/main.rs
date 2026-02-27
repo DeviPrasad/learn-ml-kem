@@ -130,4 +130,20 @@ mod tests {
     fn mlkem768_run_nist_kats() {
         _run_kats_("nist-kats/ml_kem_768.kat".as_ref())
     }
+
+    #[test]
+    fn test_generic_main() {
+        for _ in 0..2048 {
+            let mut d: [u8; 32] = [0u8; 32];
+            getrandom::fill(&mut d).expect("random bytes");
+            let (pk, dk, _) = pke::key_gen(d);
+            let mut r: [u8; 32] = [0u8; 32];
+            getrandom::fill(&mut r).expect("random bytes");
+            let mut m: [u8; 32] = [0u8; 32];
+            getrandom::fill(&mut m).expect("random bytes");
+            let c: [u8; 32 * (DU * RANK as u8 + DV) as usize] = pk.encrypt(m, r);
+            let md = dk.decrypt(c);
+            assert_eq!(md, m);
+        }
+    }
 }

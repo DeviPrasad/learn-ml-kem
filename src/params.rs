@@ -1,5 +1,6 @@
 pub const Q: u32 = 3329; // ML-KEM prime. 2^8 * 13 + 1
 pub const QI32: i32 = Q as i32;
+pub const QU32: u32 = Q as u32;
 pub const QI64: i64 = Q as i64;
 
 pub const N: usize = 256; // ML-KEM prime. 2^8 * 13 + 1

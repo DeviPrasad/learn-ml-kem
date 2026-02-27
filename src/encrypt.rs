@@ -1,6 +1,7 @@
 use crate::codec::{byte_decode_1, byte_decode_12};
+use crate::field::decompress;
 use crate::ntt::NTT;
-use crate::params::{DU, DV, N, RANK};
+use crate::params::{DU, DV, HALF_Q, N, QI32, QU32, RANK};
 use crate::ring::Poly;
 use crate::sampler;
 
@@ -8,6 +9,7 @@ use crate::sampler;
 pub struct EncryptionKey {
     key: [u8; 384 * RANK + 32],
 }
+
 
 #[derive(Clone, Debug, Default)]
 pub struct KeyGenState {
@@ -95,6 +97,10 @@ impl EncryptionKey {
             Poly::from(&md).decompress::<1>()
         };
 
+        for c in e2.add(&mu).coeff() {
+            assert!(c == 3328 || c == 3327 || (c >= 0 && c <= 1667));
+        }
+
         let prod_th_yh = {
             let mut prod_th_yh = NTT::default();
             for i in 0..RANK {
@@ -102,6 +108,50 @@ impl EncryptionKey {
             }
             prod_th_yh.inv()
         };
+
+        {
+            // reconctruction width (RW)
+            // when DU=10, 3329/(2**10) ~ 3.25. Therefore, 3 < RW < 4
+            //   (1 - 1/3.25) ~ 0.69, and (1 - 1/4) ~ 0.75
+            //   In our tests, we end up with the following assert that *always* succeeds
+            //       assert!(error_rate > 0.60 && error_rate < 0.8);
+            // when DU=11, 3329/(2**11) ~ 1.62. Therefore, 1 < RW < 2
+            //   (1 - 1/1.62) ≈ 38.3% of values are not reconstruction points and
+            //   will have nonzero error. In our tests, we see that error rate is
+            //   below 45% for ML-KEM-1024. That's the assert we use below.
+            //       assert!(error_rate < 0.45);
+            #[inline]
+            pub fn mod_pm_q(a: i32, b: i32) -> u32 {
+                let diff = (a - b).rem_euclid(QI32) as u32;
+                if diff > HALF_Q {
+                    QU32 - diff
+                } else {
+                    diff
+                }
+            }
+
+            let mut _count_diff_ = 0;
+            for i in 0..RANK {
+                let _c1_ = u[i].compress::<DU>();
+                let _c1_coeff_ = _c1_.coeff();
+                let _u_coeff_ = u[i].coeff();
+                for i in 0..N {
+                    let _error_ = mod_pm_q(decompress::<DU>(_c1_coeff_[i] as u16) as i32,  _u_coeff_[i]);
+                    #[cfg(feature = "ML_KEM_1024")]  // DU = 11
+                    assert!(_error_ <= 1);
+                    #[cfg(any(feature="ML_KEM_512", feature="ML_KEM_768"))] // DU = 10
+                    assert!(_error_ <= 2); //worse-case bound.
+                    if _error_ > 0 {
+                        _count_diff_ += 1;
+                    }
+                }
+            }
+            let error_rate = _count_diff_ as f64 / (N * RANK) as f64;
+            #[cfg(any(feature="ML_KEM_512", feature="ML_KEM_768"))] // DU = 10
+            assert!(error_rate > 0.60 && error_rate < 0.8);
+            #[cfg(feature = "ML_KEM_1024")] // DU = 11
+            assert!(error_rate < 0.45);
+        }
 
         let c1: [u8; 32 * RANK * DU as usize] = {
             let mut c1: [u8; 32 * RANK * DU as usize] = [0; _];
