@@ -348,8 +348,8 @@ pub fn byte_decode(b: &[u8], f: &mut [u16; N], d: u8) {
 mod ring_tests {
     use crate::codec::{
         _byte_decode_bssl_, _byte_decode_go_crypto_, _byte_encode_bssl_, byte_decode_1,
-        byte_decode_10, byte_decode_11, byte_decode_12, byte_decode_4, byte_decode_5, byte_encode,
-        byte_encode_10, byte_encode_11, byte_encode_12, byte_encode_4, byte_encode_5,
+        byte_decode_4, byte_decode_5, byte_decode_10, byte_decode_11, byte_decode_12, byte_encode,
+        byte_encode_4, byte_encode_5, byte_encode_10, byte_encode_11, byte_encode_12,
     };
     use crate::params::{DU, N, Q};
 

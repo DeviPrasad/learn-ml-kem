@@ -1,4 +1,7 @@
-use crate::params::{BARRETT_MULTIPLIER_24, BARRETT_MULTIPLIER_32, BARRETT_SHIFT_24, BARRETT_SHIFT_32, HALF_Q, HALF_Q_UP, Q, QI32, QI64};
+use crate::params::{
+    BARRETT_MULTIPLIER_24, BARRETT_MULTIPLIER_32, BARRETT_SHIFT_24, BARRETT_SHIFT_32, HALF_Q,
+    HALF_Q_UP, Q, QI32, QI64,
+};
 
 #[inline(always)]
 pub fn _modq_(x: i32) -> u16 {
@@ -104,10 +107,12 @@ pub fn compress<const D: u8>(x: u16) -> u16 {
     let r = a - t * Q;
     let t = t + ((r >= Q) as u32);
 
-    assert_eq!(t & ((1 << D) - 1), (((x << D) + Q/2) / Q) & ((1 << D) - 1));
+    assert_eq!(
+        t & ((1 << D) - 1),
+        (((x << D) + Q / 2) / Q) & ((1 << D) - 1)
+    );
     (t & ((1 << D) - 1)) as u16
 }
-
 
 #[allow(unused)]
 #[inline(always)]
@@ -123,6 +128,7 @@ pub fn decompress<const D: u8>(y: u16) -> u16 {
 #[inline(always)]
 pub fn decompress_1(y: u16) -> u16 {
     debug_assert!(y < Q as u16);
+    debug_assert!(y < 2);
     HALF_Q_UP * y
 }
 
@@ -176,7 +182,7 @@ mod compress_tests {
 
 #[cfg(test)]
 mod decompress_tests {
-    use crate::field::{decompress, FieldElement};
+    use crate::field::{FieldElement, decompress};
     use crate::params::{DU, Q};
 
     // for all y in Z_q and d < 12, compress(decompress(y)) = y

@@ -1,7 +1,7 @@
-use sha3::digest::{ExtendableOutput, Update, XofReader};
-use sha3::{Digest, Sha3_256, Sha3_512, Shake256};
 use crate::params::{ETA1, ETA2};
 use crate::sampler::XOF256;
+use sha3::digest::{ExtendableOutput, Update, XofReader};
+use sha3::{Digest, Sha3_256, Sha3_512, Shake256};
 
 // G
 pub fn sha3_512(data: &[u8], hash: &mut [u8; 64]) {

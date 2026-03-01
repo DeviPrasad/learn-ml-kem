@@ -218,7 +218,7 @@ impl NTT {
 #[cfg(test)]
 mod ntt_tests {
     use crate::field::{modq, modq_i64};
-    use crate::ntt::{bit_rev_7, pow_mod_q, MOD_ROOTS, NTT, NTT_ROOTS};
+    use crate::ntt::{MOD_ROOTS, NTT, NTT_ROOTS, bit_rev_7, pow_mod_q};
     use crate::params::{N, Q};
     use crate::ring::Poly;
     #[test]

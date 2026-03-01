@@ -1,8 +1,8 @@
-use sha3::digest::{ExtendableOutput, Update, XofReader};
-use sha3::{Shake128, Shake128Reader, Shake256, Shake256Reader};
 use crate::params::{ETA1, ETA2, RANK};
 use crate::prf;
 use crate::ring::Poly;
+use sha3::digest::{ExtendableOutput, Update, XofReader};
+use sha3::{Shake128, Shake128Reader, Shake256, Shake256Reader};
 
 pub struct XOF128 {
     r: Shake128Reader,
@@ -40,13 +40,13 @@ impl XOF256 {
     }
 }
 
-#[cfg(feature="ML_KEM_512")]
-fn sample_poly_cbd_eta1(b: &[u8; 64*3], f: &mut Poly) {
+#[cfg(feature = "ML_KEM_512")]
+fn sample_poly_cbd_eta1(b: &[u8; 64 * 3], f: &mut Poly) {
     f.sample_poly_cbd_eta_3(b)
 }
 
-#[cfg(any(feature="ML_KEM_768", feature="ML_KEM_1024"))]
-pub fn sample_poly_cbd_eta1(b: &[u8; 64*2], f: &mut Poly) {
+#[cfg(any(feature = "ML_KEM_768", feature = "ML_KEM_1024"))]
+pub fn sample_poly_cbd_eta1(b: &[u8; 64 * 2], f: &mut Poly) {
     f.sample_poly_cbd_eta_2(b)
 }
 

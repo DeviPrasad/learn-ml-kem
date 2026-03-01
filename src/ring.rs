@@ -1,6 +1,7 @@
 use crate::codec::{byte_decode_1, byte_encode};
-use crate::field::{compress, compress_1, decompress, modq, FieldElement};
-use crate::params::{DU, DV, N, Q, QI32};
+use crate::field::{FieldElement, compress, compress_1, decompress, modq};
+use crate::ntt::NTT;
+use crate::params::{DU, DV, N, Q, QI32, RANK};
 
 #[derive(Clone, Copy, Debug)]
 pub struct RingElement {
@@ -143,4 +144,15 @@ impl Poly {
             }
         }
     }
+}
+
+#[allow(unused)]
+pub fn inner_product(a: [RingElement; RANK], b: [RingElement; RANK]) -> Poly {
+    let ah = a.map(|s| NTT::from_poly(&s));
+    let bh = b.map(|e| NTT::from_poly(&e));
+    let mut r: NTT = NTT::default();
+    for i in 0..RANK {
+        r = r.add(&ah[i].mul(&bh[i]));
+    }
+    r.inv()
 }

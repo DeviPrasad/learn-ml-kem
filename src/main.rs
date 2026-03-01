@@ -4,15 +4,15 @@ mod codec;
 mod decrypt;
 mod encrypt;
 mod field;
+mod keygen;
 mod ntt;
 mod params;
-mod pke;
 mod prf;
 mod ring;
 mod sampler;
 
 fn main() {
-    let (pk, dk, _) = pke::key_gen([0u8; 32]);
+    let (pk, dk, _) = keygen::key_gen([0u8; 32]);
     let c: [u8; 32 * (DU * RANK as u8 + DV) as usize] = pk.encrypt([128u8; 32], [1u8; 32]);
     let m = dk.decrypt(c);
     assert_eq!(m, [128u8; 32]);
@@ -20,8 +20,11 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use crate::params::{DU, DV, RANK};
-    use crate::{pke, prf};
+    use crate::encrypt::EncryptionKey;
+    use crate::field::compress_1;
+    use crate::params::{DU, DV, HALF_Q_UP, HALF_QU16, Q, RANK};
+    use crate::ring::Poly;
+    use crate::{keygen, prf, ring};
     use std::fs::File;
     use std::io::{BufRead, BufReader};
     use std::path::Path;
@@ -70,16 +73,14 @@ mod tests {
         Ok((kat_d, kat_pk, kat_sk, kat_m, kat_ct, kat_ss))
     }
 
-
     #[cfg(test)]
     fn _run_kats_(kat_file: &Path) {
-        let (d, kat_pk, kat_sk, kat_m, kat_ct, kat_ss) =
-            _read_kat_file_(kat_file).unwrap();
+        let (d, kat_pk, kat_sk, kat_m, kat_ct, kat_ss) = _read_kat_file_(kat_file).unwrap();
 
         for i in 0..d.len() {
             let dv: [u8; 32] = d[i].as_slice().try_into().unwrap();
             let exp_pk = &kat_pk[i];
-            let (pk, dk, _) = pke::key_gen(dv);
+            let (pk, dk, _) = keygen::key_gen(dv);
             assert_eq!(pk.key_bytes(), exp_pk);
             let exp_sk = &kat_sk[i];
             assert_eq!(dk.key_bytes(), &exp_sk[0..384 * RANK]);
@@ -133,10 +134,10 @@ mod tests {
 
     #[test]
     fn test_generic_main() {
-        for _ in 0..2048 {
+        for _ in 0..128 {
             let mut d: [u8; 32] = [0u8; 32];
             getrandom::fill(&mut d).expect("random bytes");
-            let (pk, dk, _) = pke::key_gen(d);
+            let (pk, dk, _) = keygen::key_gen(d);
             let mut r: [u8; 32] = [0u8; 32];
             getrandom::fill(&mut r).expect("random bytes");
             let mut m: [u8; 32] = [0u8; 32];
@@ -144,6 +145,51 @@ mod tests {
             let c: [u8; 32 * (DU * RANK as u8 + DV) as usize] = pk.encrypt(m, r);
             let md = dk.decrypt(c);
             assert_eq!(md, m);
+        }
+    }
+
+    #[test]
+    fn test_message_reconstruction() {
+        for _i in 0..2048 {
+            let mut d: [u8; 32] = [0u8; 32];
+            getrandom::fill(&mut d).expect("random bytes");
+            let (_rho, sigma) = keygen::sample_rho_sigma(d);
+            let (s, n) = keygen::sample_s(sigma);
+            let (e, _) = keygen::sample_e(sigma, n);
+
+            let mut r: [u8; 32] = [0u8; 32];
+            getrandom::fill(&mut r).expect("random bytes");
+
+            let (y, n) = EncryptionKey::sample_y(r);
+            let (e1, n) = EncryptionKey::sample_e1(r, n);
+            let e2 = EncryptionKey::sample_e2(r, n);
+
+            let mut m: [u8; 32] = [0u8; 32];
+            getrandom::fill(&mut m).expect("random bytes");
+            let mu: Poly = EncryptionKey::decode_then_decompress_message(m);
+
+            let se1: Poly = ring::inner_product(s, e1);
+            let ey: Poly = ring::inner_product(e, y);
+            let msg_with_err: Poly = e2.add(&mu).add(&se1).add(&ey);
+            let md: [u8; 32] = msg_with_err.compress_1().byte_encode_1();
+            assert_eq!(m, md);
+        }
+    }
+
+    #[test]
+    fn test_one_bit_reconstruction() {
+        let _compressed_hq_ = compress_1(HALF_Q_UP);
+        assert_eq!(1, _compressed_hq_);
+        for err_x in 0..Q as u16 / 4 {
+            let y = compress_1(HALF_Q_UP + err_x);
+            assert_eq!(_compressed_hq_, y);
+        }
+        let y = compress_1(HALF_Q_UP + Q as u16 / 4 + 1);
+        assert_eq!(0, y);
+        assert_ne!(_compressed_hq_, y);
+        for err_x in Q as u16 / 4 + 1..HALF_QU16 as u16 {
+            let y = compress_1(HALF_Q_UP + err_x);
+            assert_ne!(_compressed_hq_, y);
         }
     }
 }

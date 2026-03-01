@@ -3,9 +3,10 @@ use crate::decrypt::DecryptionKey;
 use crate::encrypt::{EncryptionKey, KeyGenState};
 use crate::ntt::NTT;
 use crate::params::RANK;
-use crate::ring::Poly;
+use crate::ring::{Poly, RingElement};
 use crate::{prf, sampler};
 
+#[inline(always)]
 fn gen_rho_sigma(sr: [u8; 33], rho: &mut [u8; 32], sigma: &mut [u8; 32]) {
     let mut pr = [0u8; 64];
     prf::sha3_512(&sr, &mut pr);
@@ -13,7 +14,38 @@ fn gen_rho_sigma(sr: [u8; 33], rho: &mut [u8; 32], sigma: &mut [u8; 32]) {
     sigma.copy_from_slice(&pr[32..]);
 }
 
-pub fn key_gen(d: [u8; 32]) -> (EncryptionKey, DecryptionKey, KeyGenState) {
+#[allow(unused)]
+#[inline(always)]
+fn _sample_small_vector_eta1_(
+    sigma: [u8; 32],
+    mut n: &mut u8,
+    mut s: &mut [Poly; RANK],
+) -> ([RingElement; RANK], u8) {
+    sampler::sample_secret_eta1(sigma, &mut n, &mut s);
+    (*s, *n)
+}
+
+#[allow(unused)]
+#[inline(always)]
+pub fn sample_s(sigma: [u8; 32]) -> ([RingElement; RANK], u8) {
+    let mut n = 0;
+    let mut s = [Poly::default(); RANK];
+    _sample_small_vector_eta1_(sigma, &mut n, &mut s);
+    (s, n)
+}
+
+#[allow(unused)]
+#[inline(always)]
+pub fn sample_e(sigma: [u8; 32], n: u8) -> ([RingElement; RANK], u8) {
+    let mut n = n;
+    let mut s = [Poly::default(); RANK];
+    sampler::sample_secret_eta1(sigma, &mut n, &mut s);
+    (s, n)
+}
+
+#[allow(unused)]
+#[inline(always)]
+pub fn sample_rho_sigma(d: [u8; 32]) -> ([u8; 32], [u8; 32]) {
     let sr = {
         let mut sr = [0u8; 33];
         sr[0..32].copy_from_slice(&d);
@@ -21,12 +53,14 @@ pub fn key_gen(d: [u8; 32]) -> (EncryptionKey, DecryptionKey, KeyGenState) {
         sr
     };
 
-    let (rho, sigma) = {
-        let mut rho = [0u8; 32];
-        let mut sigma = [0u8; 32];
-        gen_rho_sigma(sr, &mut rho, &mut sigma);
-        (rho, sigma)
-    };
+    let mut rho = [0u8; 32];
+    let mut sigma = [0u8; 32];
+    gen_rho_sigma(sr, &mut rho, &mut sigma);
+    (rho, sigma)
+}
+
+pub fn key_gen(d: [u8; 32]) -> (EncryptionKey, DecryptionKey, KeyGenState) {
+    let (rho, sigma) = sample_rho_sigma(d);
 
     let ah: [[NTT; RANK]; RANK] = {
         let mut ah: [[NTT; RANK]; RANK] = [[NTT::default(); RANK]; RANK];
@@ -34,20 +68,9 @@ pub fn key_gen(d: [u8; 32]) -> (EncryptionKey, DecryptionKey, KeyGenState) {
         ah
     };
 
-    let (s, _n_) = {
-        let mut n = 0;
-        let mut s = [Poly::default(); RANK];
-        sampler::sample_secret_eta1(sigma, &mut n, &mut s);
-        (s, n)
-    };
-
-    let e = {
-        assert_eq!(_n_, RANK as u8);
-        let mut n = _n_;
-        let mut e = [Poly::default(); RANK];
-        sampler::sample_secret_eta1(sigma, &mut n, &mut e);
-        e
-    };
+    let (s, n) = sample_s(sigma);
+    assert_eq!(n, RANK as u8);
+    let e = sample_e(sigma, n).0;
 
     let sh = s.map(|s| NTT::from_poly(&s));
     let eh = e.map(|e| NTT::from_poly(&e));
@@ -93,8 +116,8 @@ pub fn key_gen(d: [u8; 32]) -> (EncryptionKey, DecryptionKey, KeyGenState) {
 #[cfg(feature = "ML_KEM_512")]
 #[cfg(test)]
 mod mlkem512_pke_keygen_tests {
+    use crate::keygen::key_gen;
     use crate::params::RANK;
-    use crate::pke::key_gen;
     use hex;
 
     #[test]
@@ -113,8 +136,8 @@ mod mlkem512_pke_keygen_tests {
 #[cfg(feature = "ML_KEM_768")]
 #[cfg(test)]
 mod mlkem768_pke_keygen_tests {
+    use crate::keygen::key_gen;
     use crate::params::RANK;
-    use crate::pke::key_gen;
     use hex;
 
     #[test]
