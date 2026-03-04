@@ -1,3 +1,8 @@
+def: def.md
+	pandoc def.md --log=pandoc.log --defaults=pdf-defaults.yaml --metadata-file=def.yaml --syntax-highlighting=tango -o def.pdf
+	@echo "def.pdf is ready."
+	@open def.pdf
+
 sampler: sampler.md
 	pandoc sampler.md --log=pandoc.log --defaults=pdf-defaults.yaml --metadata-file=sampler.yaml --syntax-highlighting=tango -o sampler.pdf
 	@echo "sampler.pdf is ready."

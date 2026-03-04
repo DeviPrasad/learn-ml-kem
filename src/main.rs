@@ -1,4 +1,4 @@
-use crate::params::{DU, DV, RANK};
+use crate::params::{DU, DV, K};
 
 mod codec;
 mod decrypt;
@@ -13,7 +13,7 @@ mod sampler;
 
 fn main() {
     let (pk, dk, _) = keygen::key_gen([0u8; 32]);
-    let c: [u8; 32 * (DU * RANK as u8 + DV) as usize] = pk.encrypt([128u8; 32], [1u8; 32]);
+    let c: [u8; 32 * (DU * K as u8 + DV) as usize] = pk.encrypt([128u8; 32], [1u8; 32]);
     let m = dk.decrypt(c);
     assert_eq!(m, [128u8; 32]);
 }
@@ -22,7 +22,7 @@ fn main() {
 mod tests {
     use crate::encrypt::EncryptionKey;
     use crate::field::compress_1;
-    use crate::params::{DU, DV, HALF_Q_UP, HALF_QU16, Q, RANK};
+    use crate::params::{DU, DV, HALF_Q_UP, HALF_QU16, Q, K};
     use crate::ring::Poly;
     use crate::{keygen, prf, ring};
     use std::fs::File;
@@ -83,7 +83,7 @@ mod tests {
             let (pk, dk, _) = keygen::key_gen(dv);
             assert_eq!(pk.key_bytes(), exp_pk);
             let exp_sk = &kat_sk[i];
-            assert_eq!(dk.key_bytes(), &exp_sk[0..384 * RANK]);
+            assert_eq!(dk.key_bytes(), &exp_sk[0..384 * K]);
 
             let mut hash_ek = [0u8; 32];
             prf::sha3_256(&pk.key_bytes(), &mut hash_ek); // H(ek)
@@ -98,7 +98,7 @@ mod tests {
             let r: [u8; 32] = hash[32..].try_into().unwrap();
 
             let ct = pk.encrypt(m.into(), r);
-            let exp_ct: [u8; 32usize * (DU as usize * RANK + DV as usize)] =
+            let exp_ct: [u8; 32usize * (DU as usize * K + DV as usize)] =
                 kat_ct[i].as_slice().try_into().unwrap();
             assert_eq!(ct, exp_ct);
 
@@ -142,7 +142,7 @@ mod tests {
             getrandom::fill(&mut r).expect("random bytes");
             let mut m: [u8; 32] = [0u8; 32];
             getrandom::fill(&mut m).expect("random bytes");
-            let c: [u8; 32 * (DU * RANK as u8 + DV) as usize] = pk.encrypt(m, r);
+            let c: [u8; 32 * (DU * K as u8 + DV) as usize] = pk.encrypt(m, r);
             let md = dk.decrypt(c);
             assert_eq!(md, m);
         }
@@ -160,9 +160,9 @@ mod tests {
             let mut r: [u8; 32] = [0u8; 32];
             getrandom::fill(&mut r).expect("random bytes");
 
-            let (y, n) = EncryptionKey::sample_y(r);
-            let (e1, n) = EncryptionKey::sample_e1(r, n);
-            let e2 = EncryptionKey::sample_e2(r, n);
+            let (y, _) = EncryptionKey::sample_y(r);
+            let (e1, _) = EncryptionKey::sample_e1(r);
+            let e2 = EncryptionKey::sample_e2(r);
 
             let mut m: [u8; 32] = [0u8; 32];
             getrandom::fill(&mut m).expect("random bytes");

@@ -1,13 +1,13 @@
 use crate::codec::{byte_decode_1, byte_decode_12};
 use crate::field::decompress;
 use crate::ntt::NTT;
-use crate::params::{DU, DV, HALF_Q, N, QI32, QU32, RANK};
+use crate::params::{DU, DV, HALF_Q, K, N, QI32, QU32};
 use crate::ring::Poly;
 use crate::sampler;
 
 #[derive(Clone, Debug)]
 pub struct EncryptionKey {
-    key: [u8; 384 * RANK + 32],
+    key: [u8; 384 * K + 32],
 }
 
 #[derive(Clone, Debug, Default)]
@@ -15,13 +15,13 @@ pub struct KeyGenState {
     pub(crate) d: [u8; 32],
     pub(crate) rho: [u8; 32],
     pub(crate) sigma: [u8; 32],
-    pub(crate) ah: [[NTT; RANK]; RANK],
+    pub(crate) ah: [[NTT; K]; K],
 }
 
 #[allow(unused)]
 impl EncryptionKey {
     // pub fn new(key: [u8; 384 * RANK + 32], seed: [u8; 32], rho: [u8; 32], sigma: [u8; 32], ah: [[NTT; RANK]; RANK]) -> Self {
-    pub fn new(key: [u8; 384 * RANK + 32]) -> Self {
+    pub fn new(key: [u8; 384 * K + 32]) -> Self {
         Self { key }
     }
 
@@ -29,9 +29,9 @@ impl EncryptionKey {
         &self.key
     }
 
-    pub fn key_and_rho(&self) -> Result<(&[u8; 384 * RANK], &[u8; 32]), bool> {
-        let (key_part, rho_part) = self.key.split_at(384 * RANK);
-        let key: &[u8; 384 * RANK] = key_part.try_into().map_err(|_| false)?;
+    pub fn key_and_rho(&self) -> Result<(&[u8; 384 * K], &[u8; 32]), bool> {
+        let (key_part, rho_part) = self.key.split_at(384 * K);
+        let key: &[u8; 384 * K] = key_part.try_into().map_err(|_| false)?;
         let rho: &[u8; 32] = rho_part.try_into().map_err(|_| false)?;
         Ok((key, rho))
     }
@@ -46,20 +46,19 @@ impl EncryptionKey {
 
     #[allow(unused)]
     #[inline(always)]
-    pub fn sample_y(r: [u8; 32]) -> ([Poly; RANK], u8) {
+    pub fn sample_y(r: [u8; 32]) -> ([Poly; K], u8) {
         let mut n = 0;
-        let mut y = [Poly::default(); RANK];
+        let mut y = [Poly::default(); K];
         sampler::sample_secret_eta1(r, &mut n, &mut y);
         (y, n)
     }
 
     #[allow(unused)]
     #[inline(always)]
-    pub fn sample_e1(r: [u8; 32], n: u8) -> ([Poly; RANK], u8) {
-        assert_eq!(n, RANK as u8);
-        let mut n = n;
-        let mut e1 = [Poly::default(); RANK];
-        for i in 0..RANK {
+    pub fn sample_e1(r: [u8; 32]) -> ([Poly; K], u8) {
+        let mut n = K as u8;
+        let mut e1 = [Poly::default(); K];
+        for i in 0..K {
             Self::_sample_small_vector_eta2_(r, n, &mut e1[i]);
             n += 1;
         }
@@ -68,9 +67,8 @@ impl EncryptionKey {
 
     #[allow(unused)]
     #[inline(always)]
-    pub fn sample_e2(r: [u8; 32], n: u8) -> Poly {
-        assert_eq!(n, 2 * RANK as u8);
-        let mut n = n;
+    pub fn sample_e2(r: [u8; 32]) -> Poly {
+        let mut n = 2 * K as u8;
         let mut e2 = Poly::default();
         sampler::sample_secret_eta2(r, n, &mut e2);
         e2
@@ -85,60 +83,54 @@ impl EncryptionKey {
     }
 }
 
+//
+// The code is organized to show, at a very high-level, how Signal's ML-KEM Braid protocol computes
+// PQ secrets. ML-KEM computes the two parts ('c1' and 'c2') of the ciphertext 'ct' in one step.
+// The ML-KEM Braid protocol notices that 'c1' and 'c2' are independent components and can be
+// incrementally computed. The 'c1' component encodes 'u = A * y + e1' while 'c2' encodes
+// 'v = t * y + e2 + m'. 'u' is a vector K polynomilas, while 'v' is a polynomial.
+// The size of `c1` can be as small as 640 bytes and at most 1408 bytes. Compare this with the size
+// of 'c2' which can be either 128 bytes or 160 bytes (at most).
+// So 'c1' is four to nine times larger than 'c2' in length.
+// Signal employs this incremental nature of ML-KEM ciphertext so it can fragment the messages
+// containing 'c1' and 'c2', and calculate a shared secret in a more efficient way in its
+// Sparse Continuous Key Agreement protocol (SCKA).
+//
+
+#[allow(unused)]
 impl EncryptionKey {
-    pub fn encrypt(&self, m: [u8; 32], r: [u8; 32]) -> [u8; 32 * (DU * RANK as u8 + DV) as usize] {
+    pub fn encrypt(&self, m: [u8; 32], r: [u8; 32]) -> [u8; 32 * (DU * K as u8 + DV) as usize] {
         let (kb, rho) = self.key_and_rho().expect("have key and seed");
 
-        let th: [NTT; RANK] = {
-            let mut th_bytes = [[0u16; N]; RANK];
-            for i in 0..RANK {
-                byte_decode_12(&kb[i * 384..(i + 1) * 384], &mut th_bytes[i]);
-            }
-            th_bytes.map(|b| b.into())
-        };
-
         let ah = {
-            let mut ah: [[NTT; RANK]; RANK] = [[NTT::default(); RANK]; RANK];
+            let mut ah: [[NTT; K]; K] = [[NTT::default(); K]; K];
             NTT::sample_ntt_matrix(rho, &mut ah);
             ah
         };
+        let (y, _n): ([Poly; K], u8) = Self::sample_y(r);
+        assert_eq!(_n, K as u8);
+        let (e1, _n): ([Poly; K], u8) = Self::sample_e1(r);
+        assert_eq!(_n, 2*K as u8);
 
-        let (y, n): ([Poly; RANK], u8) = Self::sample_y(r);
-        assert_eq!(n, RANK as u8);
-        let (e1, n): ([Poly; RANK], u8) = Self::sample_e1(r, n);
-
-        assert_eq!(n, 2 * RANK as u8);
-        let e2 = Self::sample_e2(r, n);
-
-        let yh = y.map(|y| NTT::from_poly(&y));
         let prod_ah_yh = {
-            let mut prod_ah_yh = [NTT::default(); RANK];
-            for i in 0..RANK {
-                for j in 0..RANK {
-                    prod_ah_yh[i] = prod_ah_yh[i].add(&ah[j][i].mul(&yh[j]));
+            let yh = y.map(|y| NTT::from_poly(&y));
+            let mut prod_ah_yh = [NTT::default(); K];
+            for i in 0..K {
+                for j in 0..K {
+                    prod_ah_yh[i] = prod_ah_yh[i].add(&ah[j][i].mul(&yh[j])); // Transpose(NTT(A))
                 }
             }
             prod_ah_yh
         };
-        let prod: [Poly; RANK] = prod_ah_yh.map(|p| p.inv());
-        let u: [Poly; RANK] = std::array::from_fn(|i| prod[i].add(&e1[i]));
-
-        let mu: Poly = {
-            let mut md = [0u16; N];
-            byte_decode_1(&m, &mut md);
-            Poly::from(&md).decompress::<1>()
-        };
-
-        for c in e2.add(&mu).coeff() {
-            assert!(c == 3328 || c == 3327 || (c >= 0 && c <= 1667));
-        }
-
-        let prod_th_yh = {
-            let mut prod_th_yh = NTT::default();
-            for i in 0..RANK {
-                prod_th_yh = prod_th_yh.add(&th[i].mul(&yh[i]));
+        let prod: [Poly; K] = prod_ah_yh.map(|p| p.inv());
+        let u: [Poly; K] = std::array::from_fn(|i| prod[i].add(&e1[i]));
+        let c1: [u8; 32 * K * DU as usize] = {
+            let mut c1: [u8; 32 * K * DU as usize] = [0; _];
+            for i in 0..K {
+                c1[i * 32 * DU as usize..][..32 * DU as usize]
+                    .copy_from_slice(&u[i].compress::<DU>().byte_encode_du());
             }
-            prod_th_yh.inv()
+            c1
         };
 
         {
@@ -159,7 +151,7 @@ impl EncryptionKey {
             }
 
             let mut _count_diff_ = 0;
-            for i in 0..RANK {
+            for i in 0..K {
                 let _c1_ = u[i].compress::<DU>();
                 let _c1_coeff_ = _c1_.coeff();
                 let _u_coeff_ = u[i].coeff();
@@ -175,30 +167,47 @@ impl EncryptionKey {
                     }
                 }
             }
-            let error_rate = _count_diff_ as f64 / (N * RANK) as f64;
+            let error_rate = _count_diff_ as f64 / (N * K) as f64;
             #[cfg(any(feature = "ML_KEM_512", feature = "ML_KEM_768"))] // DU = 10
             assert!(error_rate > 0.60 && error_rate < 0.8);
             #[cfg(feature = "ML_KEM_1024")] // DU = 11
             assert!(error_rate < 0.45);
         }
 
-        let c1: [u8; 32 * RANK * DU as usize] = {
-            let mut c1: [u8; 32 * RANK * DU as usize] = [0; _];
-            for i in 0..RANK {
-                c1[i * 32 * DU as usize..][..32 * DU as usize]
-                    .copy_from_slice(&u[i].compress::<DU>().byte_encode_du());
+        //
+        let th: [NTT; K] = {
+            let mut th_bytes = [[0u16; N]; K];
+            for i in 0..K {
+                byte_decode_12(&kb[i * 384..(i + 1) * 384], &mut th_bytes[i]);
             }
-            c1
+            th_bytes.map(|b| b.into())
         };
 
-        let c2 = prod_th_yh
-            .add(&e2)
-            .add(&mu)
-            .compress::<DV>()
-            .byte_encode_dv();
-        let mut ct = [0u8; 32 * (DU * RANK as u8 + DV) as usize];
-        ct[0..32 * RANK * DU as usize].copy_from_slice(&c1);
-        ct[32 * RANK * DU as usize..].copy_from_slice(&c2);
+        let prod_th_yh = {
+            let yh = y.map(|y| NTT::from_poly(&y));
+            let mut prod_th_yh = NTT::default();
+            for i in 0..K {
+                prod_th_yh = prod_th_yh.add(&th[i].mul(&yh[i]));
+            }
+            prod_th_yh.inv()
+        };
+
+        assert_eq!(_n, 2 * K as u8);
+        let e2 = Self::sample_e2(r); //, 2 * K as u8); // notice we didn't use 'n'.
+        let mu: Poly = {
+            let mut md = [0u16; N];
+            byte_decode_1(&m, &mut md);
+            Poly::from(&md).decompress::<1>()
+        };
+        for c in e2.add(&mu).coeff() {
+            assert!(c == 3328 || c == 3327 || (c >= 0 && c <= 1667));
+        }
+        let v: Poly = prod_th_yh.add(&e2).add(&mu);
+        let c2: [u8; 32 * DV as usize] = v.compress::<DV>().byte_encode_dv();
+
+        let mut ct = [0u8; 32 * (DU * K as u8 + DV) as usize];
+        ct[0..32 * K * DU as usize].copy_from_slice(&c1);
+        ct[32 * K * DU as usize..].copy_from_slice(&c2);
 
         ct
     }
@@ -208,7 +217,7 @@ impl EncryptionKey {
 #[cfg(test)]
 mod mlkem512_pke_encrypt_tests {
     use crate::keygen;
-    use crate::params::{DU, DV, RANK};
+    use crate::params::{DU, DV, K};
     use crate::prf;
 
     #[test]
@@ -220,7 +229,7 @@ mod mlkem512_pke_encrypt_tests {
         let exp_sk: [u8; 1632] = hex::decode("9cda1686a3396a7c109b415289f56a9ec44cd5b9b674c38a3bbab30a2c90f00437a264b0be9a1e8ba887d3c3b100898054272f941c88a1f208f1c914f964c1aad613a6a84f88e42d3556835fb161fdc5cd15a3bc7e74b6f2612fa8271c7ea112b05c2a36cc707ce38d5d1acc5115462a8c1aabf07276c72318337f74b5cbefea7a803790bc0393f3a54c724a5765a48f296b03f484376023626930222704c08fd3bc729315d1fc70eb7975a97b9deed162f486bbc64a097111952d89b57d765e8a991a2e564206ea7bf5e4007a66358831ca0e34b2f6a84d10f79c477cb66a8a952569367388130d7b974a63aa51996c97709bb8eabc94e6a535d792d2905474952d6b8c2222b2ae56dc66fb0461192066cddb43ec05984fb4982649771397c6a8379f3b5643069848875919e89cc439a3be2f081490f341bd1240add80ddb8c9963b47a2a0992290338da9c3b725c6da44718c01046812562afb084837acb3c575e4f93936c352ac0e70aa3845ee485296e6b02de0b47b5c4c96b0b7cf94c4abe95486153118e43c2b9c84d9da91c6c5acd5a57002d058497992799e5ba1ce6c25eb29844d858ba1c37850c0c2f57c60de37f77c082ec14494eba288a65915116c20a325de31aaadd680db19c0cfcc3460f0aa01a87a6a580c6ca291faef0ccc49b76a8dac4f9d41640509dbd0b4045c1530ed34755d47462700f2a8caf9680a6d7e38a7e2a63e937650a23306d855da2a2b7ef505ca596ab0485013ea927c7342343613643ba4007d6c874b980c79c3aa1c74f8581c34849b36ea79815fbb4ccf9610583081d7c5b4409b8d0531c04bcaf7cc751103a5fd1ba4470833e89775aded970b5471859250fe7267105835f390030c5e7cd3f961019eaaea23777d347bb2adcb673c02034f394342271bcea6414e546c3b20bd57481c7ea14c77c388cc86251c12558b100f8c5b3d03ca2c70713909659c8ba26d0d1765e0bc823d68ca5570de600cd0941725d386e14c1012df5951beb8d8281a4f6815d3760b764295ad0406c2bf7928ad65032b65f14b77ccb8917c93a29d6287d8a6062399cb6400865ed10b619aa5811139bc086825782b2b7124f757c83ae794444bc78a47896acf1262c81351077893bfc56f90449c2fa5f6e586dd37c0b9b581992638cb7e7bcbbb99afe4781d80a50e69463fbd988722c3635423e27466c71dcc674527ccd728968cbcdc00c5c9035bb0af2c9922c7881a41dd2875273925131230f6ca59e9136b39f956c93b3b2d14c641b089e07d0a840c893ecd76bbf92c805456668d07c621491c5c054991a656f511619556eb97782e27a3c785124c70b0daba6c624d18e0f9793f96ba9e1599b17b30dccc0b4f3766a07b23b257309cd76aba072c2b9c9744394c6ab9cb6c54a97b5c57861a58dc0a03519832ee32a07654a070c0c8c4e8648addc355f274fc6b92a087b3f9751923e44274f858c49caba72b65851b3adc48936955097cad9553f5a263f1844b52a020ff7ca89e881a01b95d957a3153c0a5e0a1ccd66b1821a2b8632546e24c7cbbc4cb08808cac37f7da6b16f8aced052cdb2564948f1ab0f768a0d3286ccc7c3749c63c781530fa1ae670542855004a645b522881ec1412bdae342085a9dd5f8126af96bbdb0c1af69a15562cb2a155a100309d1b641d08b2d4ed17bfbf0bc04265f9b10c108f850309504d772811bba8e2be16249aa737d879fc7fb255ee7a6a0a753bd93741c61658ec074f6e002b019345769113cc013ff7494ba8378b11a172260aaa53421bde03a35589d57e322fefa4100a4743926ab7d62258b87b31ccbb5e6b89cb10b271aa05d994bb5708b23ab327ecb93c0f3156869f0883da2064f795e0e2ab7d3c64d61d2303fc3a29e1619923ca801e59fd752ca6e7649d303c9d20788e1214651b06995eb260c929a1344a849b25ca0a01f1eb52913686bba619e23714464031a78439287fca78f4c0476223eea61b7f25a7ce42cca901b2aea129817894ba3470823854f3e5b28d86ba979e54671862d90470b1e7838972a81a48107d6ac0611406b21fbcce1db7702ea9dd6ba6e40527b9dc663f3c93bad056dc28511f66c3e0b928db8879d22c592685cc775a6cd574ac3bce3b27591c821929076358a2200b377365f7efb9e40c3bf0ff0432986ae4bc1a242ce9921aa9e22448819585dea308eb03950c8dd152a4531aab560d2fc7ca9a40ad8af25ad1dd08c6d79afe4dd4d1eee5ab505d7cfad1b497499323c8686325e4792f267aafa3f87ca60d01cb54f29202a").unwrap().try_into().unwrap();
         let (pk, dk, _) = keygen::key_gen(d);
         assert_eq!(pk.key, exp_pk);
-        assert_eq!(dk.key_bytes(), &exp_sk[0..384 * RANK]);
+        assert_eq!(dk.key_bytes(), &exp_sk[0..384 * K]);
 
         let m: [u8; 32] =
             hex::decode("eb4a7c66ef4eba2ddb38c88d8bc706b1d639002198172a7b1942eca8f6c001ba")
@@ -238,7 +247,7 @@ mod mlkem512_pke_encrypt_tests {
         let r: [u8; 32] = hash[32..].try_into().unwrap();
 
         let ct = pk.encrypt(m.into(), r);
-        let exp_ct: [u8; 32usize*(DU as usize * RANK + DV as usize)] = hex::decode("521c88486c35f6c245839212ab0e23660cd5b68fccd5a7b41eb5a3ce8844a31088c878eefeb44739cf9130013a83faaa78037443e5d749ba4d6f156934cc89c2d9abc76cb7ff050b4eeeb4a58611be330b3fdee875c1f366216ad659fabbebce37114e795c65f1eeca93181343005410febae042dfaeead873cf1c575d38ce26ec5c02940c0224e983881c2a1a4771ba316628a0f425ef54e984fe70e3866c79780b7572462ce5a9e116b55439ae921ff8b0d89d8616d405135dfab8f14d7da03f752517da847458ab83646ce5b4073788c66a6b60faf64b8fed507ee2a7d931f746b9f2595769721a59d93e4852aaf8185114f4a04f0f6f3ca144ba8ee1ba52db4aa7dc274156862812dc36e06997942bab02822bfc5fdfcdacea869c1a7672a4c794c9c09cc8a76df894324c14a53e9961cf40f0e70dc18583aa5e3d025a5b8d9ceda71d7902ebc5d499f059386b9910c75ba834b9d0c70ad9b9ea683aa699865f9ca7f3f30d20b78ff99850216a62f919a9d9eca482a52eaa2500fe5b80853cbb88e17ce593eb23709bac01fdfc941b527f5180e0decc3785f04d9120098f14c07f9244b441f2897f243c846a1d093d6a9c0b40e842a6d12e1d2e01bb44693d61c875ef007673787aaf167c1ec2b2f61ab8b504032a14490c109a0c2aee872fcd629594992ebd6dcde42ff6a602a5c7e15f50b799a7780829db1cb2e70e89944cf543224d4339ccf317a0ba195a07df0f43d7eee2400080da25a40f320061b15ae23ea0dee42474b2274d92c72c7e82f938bf826934ca2aaaca49cd73eb36d182591b8145d89ac8d6ceb7be8a1d7960d04171d7d03d84580bca9b5976ad1ed6cc8b021beecdbcc8b51a9b091c6625861097a32fb5a41e15b856cda135c3ca29c8656603ce3eb78071494197f0906d8b2a2cb208076ec89ce5760b199e937e13febc7893665ab6b2d5c85dc9a5d873cbf55b4a69343d768fbeef4b5eb88d0c31ffd366c66e13866e3f33eecbf2c3329c111c0cde2b9560892ce1a2686a2a1c18b7a7261a55bda57ade241544f3561390bdc69514429c8d5fbea9188baf2892").unwrap().try_into().unwrap();
+        let exp_ct: [u8; 32usize*(DU as usize * K + DV as usize)] = hex::decode("521c88486c35f6c245839212ab0e23660cd5b68fccd5a7b41eb5a3ce8844a31088c878eefeb44739cf9130013a83faaa78037443e5d749ba4d6f156934cc89c2d9abc76cb7ff050b4eeeb4a58611be330b3fdee875c1f366216ad659fabbebce37114e795c65f1eeca93181343005410febae042dfaeead873cf1c575d38ce26ec5c02940c0224e983881c2a1a4771ba316628a0f425ef54e984fe70e3866c79780b7572462ce5a9e116b55439ae921ff8b0d89d8616d405135dfab8f14d7da03f752517da847458ab83646ce5b4073788c66a6b60faf64b8fed507ee2a7d931f746b9f2595769721a59d93e4852aaf8185114f4a04f0f6f3ca144ba8ee1ba52db4aa7dc274156862812dc36e06997942bab02822bfc5fdfcdacea869c1a7672a4c794c9c09cc8a76df894324c14a53e9961cf40f0e70dc18583aa5e3d025a5b8d9ceda71d7902ebc5d499f059386b9910c75ba834b9d0c70ad9b9ea683aa699865f9ca7f3f30d20b78ff99850216a62f919a9d9eca482a52eaa2500fe5b80853cbb88e17ce593eb23709bac01fdfc941b527f5180e0decc3785f04d9120098f14c07f9244b441f2897f243c846a1d093d6a9c0b40e842a6d12e1d2e01bb44693d61c875ef007673787aaf167c1ec2b2f61ab8b504032a14490c109a0c2aee872fcd629594992ebd6dcde42ff6a602a5c7e15f50b799a7780829db1cb2e70e89944cf543224d4339ccf317a0ba195a07df0f43d7eee2400080da25a40f320061b15ae23ea0dee42474b2274d92c72c7e82f938bf826934ca2aaaca49cd73eb36d182591b8145d89ac8d6ceb7be8a1d7960d04171d7d03d84580bca9b5976ad1ed6cc8b021beecdbcc8b51a9b091c6625861097a32fb5a41e15b856cda135c3ca29c8656603ce3eb78071494197f0906d8b2a2cb208076ec89ce5760b199e937e13febc7893665ab6b2d5c85dc9a5d873cbf55b4a69343d768fbeef4b5eb88d0c31ffd366c66e13866e3f33eecbf2c3329c111c0cde2b9560892ce1a2686a2a1c18b7a7261a55bda57ade241544f3561390bdc69514429c8d5fbea9188baf2892").unwrap().try_into().unwrap();
         assert_eq!(ct.len(), exp_ct.len());
         assert_eq!(ct, exp_ct);
 
@@ -260,7 +269,7 @@ mod mlkem512_pke_encrypt_tests {
         let exp_sk: [u8; 1632] = hex::decode("cb266284006bcbe18257b39a7ac504ddbc5634e11bfa190c1fe21eb626784eaa018e8a072c28acae370f3a0a55fbe5c8ce677aad82a754e7cbc5682d88a90eb8c30b921814792947099b9ddcb566ef35b3362b6164207e8f0a92b2181edd902c723a96ddf1a1110c672ae137c0481552da5e19d33e8ce2a85ff80263e7445cd9310d180e3290243d43207d8a0da5488f864a33ddbbc8a6179ef7d150266063c7745c49f3a383873b18b6575f02820aa80eace733153336293763c939cdd3778f4df4cd619369cd68217c70a6391b99007bc172fba7b6f44914389fbed181fdac7bbbfa1d5ad771f46c7697431358b618dc039302e30418ea4b15020880ba71f081209ee328a19a06d7da1b85ca26e9e68616c615d935a0e9e0ceaa7aa812fb17a46c70a3f3547e196350596acdb2bf6f31871b007688434a9d845f130a7683921fdeb39e84a5a30b052cf4c29b3978a8eb98c9ad669aa7da70496a3a9b5b892ab30dab2bca03fc0f431a666cac1075989773b1ce99b3888fb07621a98a1641a18ed898bde3c0fea9cf67c2be09497aef93b9c0aa630a887cc6220460cb2ed425677d988e968b2b3793bf1dbb603174af03e517e8a2bf4b82553fb13bc047ad09c76c1f285a1657603c483554b49391ebb9b0270c7932685c875e4f33a815598f3622ba300a1235e88cfa610bd97b8f87413550318962cb0737854c5a385d0f2035c52a946ad069b1ea642ff76402d38749e13724127a02fcc1b98bb27f29c9973c1e76430b17fc1ff22c5a810226d21c6aa0e49a28841a28d27490aa5238da57c743932528ab11e694ab3b9b211498b9f51026775e807012a3dbc371263f5641c4a885cb63a11c81589aa87aae17f67bf5eb63c6d27fae943c529902c46614bb9baa6782a3f1db4604479d7dbbbeafe7ce4825b6c5547ae35c82eaa57009c8091e334f935248cfa0687c71a2b993937cf056363578adc7184f07232d545262566fcd596101c0ba95c4543238001a75c657988cbfab2479130fbe8c8b7d90aaabd66fa8848ede30cccbc786972866a46036c3ca3159638797080e5c56b06b51b4d8374e2f9c4877b37f5dd1640e41135735b94cb100b81cb94ecc1fe5d8cac4211256c1aae609238966b439735ef69b493125a65fb46c70bca5c1d94ecec68eec35bfd5fc0cdb035658e6103e7844c741b725e42d12098df1cc8d527cbb58b79498f824c55011b1f61b1d731ce39b40ffd562bb5ba17978b3657518f5ea7436363d99b91400dc5a2da7943e082e9cb77174f881b0297ac3722eafca76ae6a7222f3497d717716dc0932d2496fa218a69976cb332d9e3a2828a70ba8f534bd35165f7a0daab1a64a63251f88759cc70aa4d5274b86311f764da50c0184746ec6eb0c2b481adeb562e3048da81b00d7941883ebb09c3885c8fa5c8ed3a9c58493351906dbf83df1db4e74188ae650201d5999e91bca68378cd095295a55ba78f14fa9005f21232f8900c572c8721b8ab1891277dd838842f58b86e08402069b60461021a83c7081c16c006add1cc92dc3052ee97291f676b4db54d4fb5ac3e15fdeb314dec6170acb7865aaa9b691569fcc09a4bca159b40824d6ce9053a199f92bd9c06a38eba7d8980e286543d6a841f5589f277b8ced946ee8da5805f07b33d1a151b4b4dfe1175659c7f6804bd28474a2b387f75791de4a9304da1da2e660a49516edc1ade673488a3a580a7c48285a5033196ae20582ed5138dfaab59a5737d3a360bf0380832c3e49008d0fb790802281c09b044069426334862310b0ada4261c768c8572a09d1bb0df54b1c6b553150abb0280cd2c1c4b3894705382c4ada73b42e55b247b67200b939f71bd299a02f0db9974f2afd1cc906cd2c88c62ab9771b6a26b3e560a7f6717bd9c22b3cd5a14eeaa99b471094ff872219027bc0c24fe9114b316abf3585236e4505bdb03b4789cb09a5d16e1764f4b8261d3890193b268b67a9c99381e244cc4464fb0788815c6c9e92143dcc71689273969ec4f63455a3a06cd07e1002ad38dbd216949200619aa70e8327e9deb2a7c23967ba65e34f14af513080ef0738900850bc730f8c2b78dd6b8e4219c25491c5a9cb755999bf49136d0619eae169c68316c2fa6a42e401b9447514a6878ed634ec05217cefb6008ff98e491c41e2e6355f7cc8a230f2f2380abd2635b7b0cd371201c1c404c611e22377f1c66fda96a3839f300960315b3292e81af8a7a68cb66742b6eaff7ecfe33efe4042a44f2f801170616925be8cca1bd1812a7335dcd80f9cf14").unwrap().try_into().unwrap();
         let (pk, dk, _) = keygen::key_gen(d);
         assert_eq!(pk.key, exp_pk);
-        assert_eq!(dk.key_bytes(), &exp_sk[0..384 * RANK]);
+        assert_eq!(dk.key_bytes(), &exp_sk[0..384 * K]);
 
         let m: [u8; 32] =
             hex::decode("da9c015b918108c1596309fe0042218de4c31900b8dfa6c1cec28ad10988bbc7")
@@ -278,7 +287,7 @@ mod mlkem512_pke_encrypt_tests {
         let r: [u8; 32] = hash[32..].try_into().unwrap();
 
         let ct = pk.encrypt(m.into(), r);
-        let exp_ct: [u8; 32usize*(DU as usize * RANK + DV as usize)] = hex::decode("2deae3a5a977334db80cbb52779315e974a0b17e90e52c9b00abaeebf4f85e394645ce31bbc46fb8d4986519cd35b340b4e2260695e6a288c056b1c1e611b72da9ffc3be60a2c9a2c406867bc6c25f148f411558e6bd618aa3f9236265ebf73e1b71e9d281d9b19933eb75e26b77d7056d3a96567ad22469f144ca63eb0c7f395b5c66c0b62ab13fa1bb63d311c6a66ed8fbe935a7fe53ada6911528a75fd82766d554561484a2a8667a7db5653df493eb5efa9c3369f3479903d792b40ba3b445a7a2915f52510f123fc2059557cb5928062b5eff11de7d1019a078535a707b4c98f984dd42fe298b2bd261881e137afefc0e2bc128d68420b89c376eb31d171bee820cb5cbaf9b6380b2d52829e417b5084be94bd4dced790d0cc2ca9203fafebbeea32a508d66db0c8713dbea6943ab04df68d53617307c7609cc00cc38940f1628e64a30549488493496ad2292311d212cb64890a37b887bf49f31438fa2f63e5f71f2ac2c807b44dc5b3cbce81e0a5f62106273fe62262ec9dcbd841c08a755ec3a1e30d8f5d495df6418b02497f82eb2cad06f828f3f8e05ab59b16de47fe8a49eec8b9852e50ae2ab6d9438250fe8954a39e7b6e9d8dac5eca5a1d924c864399f7bc99dbb97672a76e862b02fac71f3ec870a1ede4ad5656480bbffef4b76dde4c24107c4b1ef0c9522dbe92c522179ef57606f8d910c62cd199842a6170e00f388c9da92906d8d255db97876ecae1f550af6c5a2ceedea7b41ff51e9238db05bc2b6eb318d3d28bf474bbca7dbad03b4cfbf55c2f0da829ef7d56d352b353ada6e7d11357862a119d2f37d2d2827aa4e72f0fe74c7aa0fe0696b30f526d20d88ceb194d4a8b085e4f0be0a7267104441c356f492e9018b6ef7dcc4220e477257bc2d47882f19b0c48659712bad748c9eddd13f5f64693631b709973821a2b5abacb220ae8a3d570f2cacbff55b48318223670367128b24b9d59e8791847a9a4f9d42de52d4853bfbc9e86c3e1ddf521100fc5ea300ee2d6eb635e807e3c8578d5a759315ab6c42df7aa1199493deb3f26f295d50b280b4a34477934b").unwrap().try_into().unwrap();
+        let exp_ct: [u8; 32usize*(DU as usize * K + DV as usize)] = hex::decode("2deae3a5a977334db80cbb52779315e974a0b17e90e52c9b00abaeebf4f85e394645ce31bbc46fb8d4986519cd35b340b4e2260695e6a288c056b1c1e611b72da9ffc3be60a2c9a2c406867bc6c25f148f411558e6bd618aa3f9236265ebf73e1b71e9d281d9b19933eb75e26b77d7056d3a96567ad22469f144ca63eb0c7f395b5c66c0b62ab13fa1bb63d311c6a66ed8fbe935a7fe53ada6911528a75fd82766d554561484a2a8667a7db5653df493eb5efa9c3369f3479903d792b40ba3b445a7a2915f52510f123fc2059557cb5928062b5eff11de7d1019a078535a707b4c98f984dd42fe298b2bd261881e137afefc0e2bc128d68420b89c376eb31d171bee820cb5cbaf9b6380b2d52829e417b5084be94bd4dced790d0cc2ca9203fafebbeea32a508d66db0c8713dbea6943ab04df68d53617307c7609cc00cc38940f1628e64a30549488493496ad2292311d212cb64890a37b887bf49f31438fa2f63e5f71f2ac2c807b44dc5b3cbce81e0a5f62106273fe62262ec9dcbd841c08a755ec3a1e30d8f5d495df6418b02497f82eb2cad06f828f3f8e05ab59b16de47fe8a49eec8b9852e50ae2ab6d9438250fe8954a39e7b6e9d8dac5eca5a1d924c864399f7bc99dbb97672a76e862b02fac71f3ec870a1ede4ad5656480bbffef4b76dde4c24107c4b1ef0c9522dbe92c522179ef57606f8d910c62cd199842a6170e00f388c9da92906d8d255db97876ecae1f550af6c5a2ceedea7b41ff51e9238db05bc2b6eb318d3d28bf474bbca7dbad03b4cfbf55c2f0da829ef7d56d352b353ada6e7d11357862a119d2f37d2d2827aa4e72f0fe74c7aa0fe0696b30f526d20d88ceb194d4a8b085e4f0be0a7267104441c356f492e9018b6ef7dcc4220e477257bc2d47882f19b0c48659712bad748c9eddd13f5f64693631b709973821a2b5abacb220ae8a3d570f2cacbff55b48318223670367128b24b9d59e8791847a9a4f9d42de52d4853bfbc9e86c3e1ddf521100fc5ea300ee2d6eb635e807e3c8578d5a759315ab6c42df7aa1199493deb3f26f295d50b280b4a34477934b").unwrap().try_into().unwrap();
         assert_eq!(ct.len(), exp_ct.len());
         assert_eq!(ct, exp_ct);
 
@@ -300,7 +309,7 @@ mod mlkem512_pke_encrypt_tests {
         let exp_sk: [u8; 1632] = hex::decode("263c5bb08411fdd7c93d377e17d0206fa62c8be02c27507e83eb4c4b0687458cb6f12a26b3b55a0eb55243d2b5f8d29109fc665d11cba1b6123eb943713073ff9493828a94c16776676672d52173e3f2c1307c249828b9623493de32cfdf63272dc13b52513b4be513f0e37f46c424d6d47af34837b2d27e8a86bccc39ae44b3c0a020498a70ad3167077b529cc120614b613dbdc04ec1702f54898f29a67576f29e889417f0921c8743547e388cb24c5fd2ba14591217fc410d25d61df3e1b6ee7c6b4700be0e5b404656ad954b23f8a32889e443d082024215660a4bba9787b100e194a7c83fdbf7298e024011354e0bda22957772c555c171caa48ed31d3b46ae26d428d738342d5336d47b80816c7cf0e840b1fac283ba99c5ea463fd5b5c151995a0bab48bc526788502c16ac62a45d7ee3873230b943a566fa777f6e30abfd81981073c8e9f3307e5c6d8720c8f9d33652824d3cab4dfc679cae539c6c591bd455a7d6e24fe9567a80923da6c58414b1cc60f5cd4fb10070556bac845b1d957aff543774236bde054c19e97950cb319df677466b3cd4e64767391780cbc8b9f78dc7d0ac35e2acdc3b2045a0a6199c83033a92ac7b752475302385a8cbd4277f9c6028a6011ea834ed8198056b0151c95f42f2573ff063b6161ddc05769683abddd55767065036b996ec386cc0a59bcea3a0cbf211c47b098981102cc62801987a81521656336df47b3b0bb7183fc8bb7cca831364054bb73e9443b5d2a74c3116a2603ab523e64cff2b8e76365aa0541ebef52ad8004a37232b85d27d3612c9bb98b2c943ad748158f91525a5a5acf1e82db3a0b1520974a3b79a5ed77fb754b292baa696496713d19f6937ccbf2a81f0d889206c7b6227be21a6677d617fe203728b28b4bb847d93a02340f6a45fa96f151126a9f5b7322b45820950b0bbc87e4a262053c9bec76f8eacc3cbc19f26759272a3b2dc556c4c2c917521733fcc9c71d629099614b433b390772aa7c80315b0964ac92b36881a8ea8c90057b23b40a316a1a4f330b890251673169ae0b6393850bd89403aeda582504390919257d0599b89c76025c6502a589cbf1c03ebf450685c84cc06a2e308064736a5a7617750132c07156435761d4727ac06fcaa8e5209adba07f985610aaa29cfb33bb33bb9bb58048a88a17bf22564b8044ca4b62d0a6de52868b49a9771652b42fa300a3915d9693a8920176c631ef55a289ef58e7d2b683c1b4329314c1481312b412862c2938ef1b8014a2ec9305be3a813e6fc1ea989ac406ac47c4bbc1d115c7bc09bc6c3744ad54061458bff21167be8cfcf834cc3652bedc2bbc2223e095b7390b01766e7079d940108987067b36ee7d93045b53df88c4315fc84ddb4cf73d0be18802281ac51bee246983acd6e33ba8eab6b68f15ce9a7b92af649baa4a267691c5bab62a7073f2c29a33b0843056a1f8dc7696cf8248ada5941dbaa6eeaa78d7c05ff821d9f2c362b104ff8b12e06d125c4d329954c078a99ad95eb806f4406ba1742d153cd8ae48bb11384e7bb0030a32639e75211075417d4b46603545e3a07796048a9385488a09c86f14b5b441c5b63b24d0ac733a46c84776db4ba4d7ac4227c216755a16269d27261d905dc587eb57616f4367e8b3309dcb558b47957a8ac0be9d7aae6a618dec9c0e56a6ac867919aa21ae77a5a5421465bec178bfabf61204f6b60aa94704f79842f03402a3d35a8c4a4186e36855da666b4fb254c225124c33b11a6a13bf7ca0b4290e132457b68c7de04ad542110e08a352c0b2aee19c5d637c865e7379bf7c0a3d39466bc58ba4175224789785520d6ea6ab86727f198b6e236aef35b90d7205815fc1774b9a6815b2e427a329d4521e5ec77f19c3277b35dae3944f5bc622ea738e3563e2c8857ea8796e5c01729c3ce244335f071bc2a492c51d22b300a9cfd0c69df3c8f0e46be28cacf3a4c1a498684d8a137ddccb419b33935ab5e9e47c8cdd658b1614f4d9b539c7bcd85827fdb5b8b7f8c3f08b9922ce68851ec5c27431193636603f32428b8254bc69b7c20511838bded03b77427cc68200025456d408101e4a4c1d15c4244e7ccb9763562370ec3c94a4ada04bc4852ec20879b08625cc9880ae73ad1727b69b85aef2639674923e6a5206df7ad3cdd882eb47c2ebb4c7bf3a28c13d5333cdc3d52179ef0f4a6a5b6ad7ee1a9c00b029b4e13f35eaa5e0d8e29e1630e4ec8358c7ffa69d84248ff45452bce5777b08108e059234029d3309cbc2bcaad8ebb37dcf27832f2").unwrap().try_into().unwrap();
         let (pk, dk, _) = keygen::key_gen(d);
         assert_eq!(pk.key, exp_pk);
-        assert_eq!(dk.key_bytes(), &exp_sk[0..384 * RANK]);
+        assert_eq!(dk.key_bytes(), &exp_sk[0..384 * K]);
 
         let m: [u8; 32] =
             hex::decode("c11e2fcd6cc56977006f5dfa825271c6fd49069a747eb36c1765f5d5a22b38b3")
@@ -318,7 +327,7 @@ mod mlkem512_pke_encrypt_tests {
         let r: [u8; 32] = hash[32..].try_into().unwrap();
 
         let ct = pk.encrypt(m.into(), r);
-        let exp_ct: [u8; 32usize*(DU as usize * RANK + DV as usize)] = hex::decode("39e1701b3f7a3ccdbd98f5565a14bada0d4567b06e25352a9a572cf6edaa8f65d8715d8ebdb4b314ba11d96b54bd7def014ecf964646c256bfbc71901a6c46c08d142c3fd485ce4807e91f241776cbd2510c8232d813f46340b312aa11e00ff8b69debf8a7809e1a6081c94e46d8ac5c74fe462150d57c9747956a8362dcf555dfb1b980a5279352543e4730f089fe626b33b3b3332fa25a1096bd893d932ea1974061369fc0e529c10f1730598e10b1f68a24740a4397ff5c0d69fda49cac5076cb82a6d3769f21c1f0e8d48366c71db07cbfc68553196f5192b3921f1bb2b6674a69a0f2afea5e6e3935d9f05ce3e4a945703e4329ba2c2a65010a06402cf94171ac501c1d1af2382340bdf035b6bb28ec18675f3c3486fd4206f58594264a8db4a0a3bfc63802b2b835e807713da8f66fa41e102374f2345e264f2f62106711e15270d2b8da15e212361e61b3325b41488a89a476d64dfe684f5a917740f6077ea354284dea38d2442d1a494e9e29eea89b6048d115e4d45269f3b752df3d1cac77c2fd5b3c87e5307d67b5ca0fd148c6a9a30faea58ccbde61b020dd732c63665589502bd3f49a13ce51003169eb60cb33e3c6dd5bd52e3ec5b44f34e775997fcc6c3b66f56d3ec50a54b6acc9edc9c43fdfed485240992cfb33d325d4a799e46e48f88810eb93c21040148bc75df4783edb27fc7431f18a5a124ec2b80e6172c13c20be283d19d509a8bddb41e8ab0ff8d1d7c97a084d5c8beebfd9f24a30b6aba303de586ed0b4c2ab233711afae426fabfc6a3f49765f88a178d8e8ee8aa4399acddba092ded8af398b8b36b772dd7514dbb3ce2d370830ec41da36eb9cc9603eecbf0be76e8c8e5970500a8332b4ca20daf06e2cc3bf430392094c8f0866cb945fb97e0ad4ed5c88a0097f8b9f22132661e3a69d34c59672bf73b82b9822461bfabb7afc75ab89bb9505c946b513a05c48f6a45c41b139bb73a6be0e9debe8f4f81445a87e30157beb6f8bc74af82dcb6ece7759fc83d71eaee549aeb3074116d8999a5c7af8de72448513761eb38ddb3c84a2a875c7ce0f8ddc8ae9").unwrap().try_into().unwrap();
+        let exp_ct: [u8; 32usize*(DU as usize * K + DV as usize)] = hex::decode("39e1701b3f7a3ccdbd98f5565a14bada0d4567b06e25352a9a572cf6edaa8f65d8715d8ebdb4b314ba11d96b54bd7def014ecf964646c256bfbc71901a6c46c08d142c3fd485ce4807e91f241776cbd2510c8232d813f46340b312aa11e00ff8b69debf8a7809e1a6081c94e46d8ac5c74fe462150d57c9747956a8362dcf555dfb1b980a5279352543e4730f089fe626b33b3b3332fa25a1096bd893d932ea1974061369fc0e529c10f1730598e10b1f68a24740a4397ff5c0d69fda49cac5076cb82a6d3769f21c1f0e8d48366c71db07cbfc68553196f5192b3921f1bb2b6674a69a0f2afea5e6e3935d9f05ce3e4a945703e4329ba2c2a65010a06402cf94171ac501c1d1af2382340bdf035b6bb28ec18675f3c3486fd4206f58594264a8db4a0a3bfc63802b2b835e807713da8f66fa41e102374f2345e264f2f62106711e15270d2b8da15e212361e61b3325b41488a89a476d64dfe684f5a917740f6077ea354284dea38d2442d1a494e9e29eea89b6048d115e4d45269f3b752df3d1cac77c2fd5b3c87e5307d67b5ca0fd148c6a9a30faea58ccbde61b020dd732c63665589502bd3f49a13ce51003169eb60cb33e3c6dd5bd52e3ec5b44f34e775997fcc6c3b66f56d3ec50a54b6acc9edc9c43fdfed485240992cfb33d325d4a799e46e48f88810eb93c21040148bc75df4783edb27fc7431f18a5a124ec2b80e6172c13c20be283d19d509a8bddb41e8ab0ff8d1d7c97a084d5c8beebfd9f24a30b6aba303de586ed0b4c2ab233711afae426fabfc6a3f49765f88a178d8e8ee8aa4399acddba092ded8af398b8b36b772dd7514dbb3ce2d370830ec41da36eb9cc9603eecbf0be76e8c8e5970500a8332b4ca20daf06e2cc3bf430392094c8f0866cb945fb97e0ad4ed5c88a0097f8b9f22132661e3a69d34c59672bf73b82b9822461bfabb7afc75ab89bb9505c946b513a05c48f6a45c41b139bb73a6be0e9debe8f4f81445a87e30157beb6f8bc74af82dcb6ece7759fc83d71eaee549aeb3074116d8999a5c7af8de72448513761eb38ddb3c84a2a875c7ce0f8ddc8ae9").unwrap().try_into().unwrap();
         assert_eq!(ct, exp_ct);
 
         let ss: [u8; 32] = hash[0..32].try_into().unwrap();
@@ -336,7 +345,7 @@ mod mlkem512_pke_encrypt_tests {
 mod mlkem768_pke_encrypt_tests {
     use crate::encrypt::EncryptionKey;
     use crate::keygen;
-    use crate::params::{DU, DV, RANK};
+    use crate::params::{DU, DV, K};
     use crate::prf;
 
     #[test]
@@ -364,7 +373,7 @@ mod mlkem768_pke_encrypt_tests {
         let r: [u8; 32] = hash[32..].try_into().unwrap();
 
         let ct = pk.encrypt(m.into(), r);
-        let exp_ct: [u8; 32usize*(DU as usize * RANK + DV as usize)] = hex::decode("b4d9dfe6717cff99afe645e90f9e9a497833488b2340c1473ceb6c39b944d7cdb748a3e961bdd632d923769aea3b177cf25a36f86f94e80332b720f0f58a134ad8c6f7b31ad0388697864a3d91f43bdc9fa163fe572aecfbaa28d8ceaaa0e92f17eabaebe9d3e117a1bc3c454c3d66e35f7b76baf327d29fbbe8d35142a1e4360a70d0de8d46977a688b6b488720afeb05f846aaafe9fc66aea186961f63264a8a1ae0d721d49385699354b745f46669f89a20b493a836774115736184732b3d0e4374558622ea186d28e822c98dba24f2fa6d233112a89c73994938c362d830aa95113d0989dc4cfdb8d50f0c872d248dcd60212c6c650ddb1679e9419acb2d2ffb8540f578f55a0d03474e3f76fdbbe15af07e3a5251574f6707b2de3a433c0c8a7b04ba67391d27534ac945dc014e9f655068b5c14bea32efec6e6ba1789b1f5c37dca456e52b66ae3a9323671954774caa1697c87dce1d2425326b7185eb986feb59eae87aa2f902e958c6f3c4cc4af8eccb7290ecc824db1a695c3dd643bc0d7c51b416acc184c00c486bb33759be1fe9750cff4282a111723a16e6adae00ea34ecde4b197e8cc1c370635ed2f1e36afa30e76d3c4450ef839c48c016230cb1cdc3b2cd9e64d2e19b50df9633f65db9088177e385502b8a782955cbd6b2e56185e0b3734aa0281734a61c5359d6c4b938424c55a467712ffb555ab782bacc5fd418910a13f28af859ae406bd7fd90490961c12f64927dec576077d4dcdf933c8f6150d8f4f1316c6e28c1f3a0784587621f3d05b6e7ee6877c56cfc97a93c337616c6a940f8d0455fad51fc1233425433ec89055ba451fe31bc51a41f6a4ee8c7aad6f365cce7c373c53bc674111a74fe2c3c187f6615ce07e7b2fd45a148d95f7649ad52ab94bced68b16fa4df9f9906c498be510d7d9d74d33370e893e0bf2f516ea981f06ebf20988ec059bc58835711ad20d8f1f4e47fea65d7f37a5d813dabe1a2c97e1b316d6825bfcd07b592a4834aa204148accda22ce8758335cb3c73db9a51261508eef5b5a2fae5a6a6ec0721313c6ee85d3c29191158d8a3d73d4a475171639a531dd8822682ea4c2375eddbd6df395066e33a16dd5d2cd81f9557268603f2b831fcfe92af431a7780ad0ff9500129ad7959c4975422a1476dfed8a280a24b1158f9fa44dedd77b9a3b883c53cefd56b9ee8bf3a8a3d4d48fda159fa7eb0abc9f69448a8faf53c15ec5f1bd9c6c9eccbf65ede2db9032b22e0a60461a86f3707a3a829968fa59dc21078891c654e8a8fe4d0efa640ee179429e5c0396178c094fdb18b6a4495a518ab6db016629feb51ed10929c4ef3f3710f3170af26a41e197aa709575c0d1a8180f8e81aa6790663a7b2623518734cc9c1d939b2971d011b1de2ad96eb4e87379abcc43334e4b4a4bf8f76cad70ba00465241ee09b6eaf3b93ae18a31fe50f2a05b8b57b76c43e3aec7310e17f385506f771bb7c67cd97f606a2a9db409b3cc3febf2cb0d762490f9aeeb8c9b7b0586").unwrap().try_into().unwrap();
+        let exp_ct: [u8; 32usize*(DU as usize * K + DV as usize)] = hex::decode("b4d9dfe6717cff99afe645e90f9e9a497833488b2340c1473ceb6c39b944d7cdb748a3e961bdd632d923769aea3b177cf25a36f86f94e80332b720f0f58a134ad8c6f7b31ad0388697864a3d91f43bdc9fa163fe572aecfbaa28d8ceaaa0e92f17eabaebe9d3e117a1bc3c454c3d66e35f7b76baf327d29fbbe8d35142a1e4360a70d0de8d46977a688b6b488720afeb05f846aaafe9fc66aea186961f63264a8a1ae0d721d49385699354b745f46669f89a20b493a836774115736184732b3d0e4374558622ea186d28e822c98dba24f2fa6d233112a89c73994938c362d830aa95113d0989dc4cfdb8d50f0c872d248dcd60212c6c650ddb1679e9419acb2d2ffb8540f578f55a0d03474e3f76fdbbe15af07e3a5251574f6707b2de3a433c0c8a7b04ba67391d27534ac945dc014e9f655068b5c14bea32efec6e6ba1789b1f5c37dca456e52b66ae3a9323671954774caa1697c87dce1d2425326b7185eb986feb59eae87aa2f902e958c6f3c4cc4af8eccb7290ecc824db1a695c3dd643bc0d7c51b416acc184c00c486bb33759be1fe9750cff4282a111723a16e6adae00ea34ecde4b197e8cc1c370635ed2f1e36afa30e76d3c4450ef839c48c016230cb1cdc3b2cd9e64d2e19b50df9633f65db9088177e385502b8a782955cbd6b2e56185e0b3734aa0281734a61c5359d6c4b938424c55a467712ffb555ab782bacc5fd418910a13f28af859ae406bd7fd90490961c12f64927dec576077d4dcdf933c8f6150d8f4f1316c6e28c1f3a0784587621f3d05b6e7ee6877c56cfc97a93c337616c6a940f8d0455fad51fc1233425433ec89055ba451fe31bc51a41f6a4ee8c7aad6f365cce7c373c53bc674111a74fe2c3c187f6615ce07e7b2fd45a148d95f7649ad52ab94bced68b16fa4df9f9906c498be510d7d9d74d33370e893e0bf2f516ea981f06ebf20988ec059bc58835711ad20d8f1f4e47fea65d7f37a5d813dabe1a2c97e1b316d6825bfcd07b592a4834aa204148accda22ce8758335cb3c73db9a51261508eef5b5a2fae5a6a6ec0721313c6ee85d3c29191158d8a3d73d4a475171639a531dd8822682ea4c2375eddbd6df395066e33a16dd5d2cd81f9557268603f2b831fcfe92af431a7780ad0ff9500129ad7959c4975422a1476dfed8a280a24b1158f9fa44dedd77b9a3b883c53cefd56b9ee8bf3a8a3d4d48fda159fa7eb0abc9f69448a8faf53c15ec5f1bd9c6c9eccbf65ede2db9032b22e0a60461a86f3707a3a829968fa59dc21078891c654e8a8fe4d0efa640ee179429e5c0396178c094fdb18b6a4495a518ab6db016629feb51ed10929c4ef3f3710f3170af26a41e197aa709575c0d1a8180f8e81aa6790663a7b2623518734cc9c1d939b2971d011b1de2ad96eb4e87379abcc43334e4b4a4bf8f76cad70ba00465241ee09b6eaf3b93ae18a31fe50f2a05b8b57b76c43e3aec7310e17f385506f771bb7c67cd97f606a2a9db409b3cc3febf2cb0d762490f9aeeb8c9b7b0586").unwrap().try_into().unwrap();
         assert_eq!(ct, exp_ct);
 
         let ss: [u8; 32] = hash[0..32].try_into().unwrap();
@@ -378,7 +387,7 @@ mod mlkem768_pke_encrypt_tests {
 
     #[test]
     fn test_encrypt_01() {
-        let _pk_: [u8; 384*RANK+32] = hex::decode("F255CE47334283B8622BE7CE76D7354E3C4FE3F6C44F6BB25C9864EE0BAEB5765950D88F438263CE8B5A7A4C0FC4C95F10C477A7521F9BB458B8AA55D2E43BDC86B72F0930EE428B4C5A9C7116310F2AA5CB03AC1603C811959EA9012D69CBCE40B37CD890999CC74FF375C66F048B240363343CB795998856D560F4C712938C79466864D20B0BE95419C9EA6A8E7203A1986D10B606691242CEF630941B116458A41C83B7DC5B06A97C840B116F2CE9CFA87A1C1AA8C4FAC137DE8498E8749B3638404271539B247183A32E7E4413B6400E0F295788084EEA93B4A7653341005672D908C62B64B11B48414B505F3036EE56CC4DA88FEF27B2DA974C9DD38C150090B5B8A29BD7C5975A8A959549044B4DAED52A7FA68335308F40C9B768C5821F78CF068A694978964F597408D09759A19578624C64DC18EAB23082E599EC488DFE016E4BA58977E15B715C612496310219B9B4775CB51C5DF03B934F7473AA58A57C602CF17C5993D30F52D753AC56BACA1A994742BC50435E179A262B3C8EECE1513955C593E7508B945F6E95CC4268CBD45B2504082FB8B23D8906946A74AC2FB676BDBC39DF76B9B8450F49D283C622784565B76B96084DFC099EC2279E5BC13492561B4439E32324B0050C5FE6451974BF0D72750AC58BAC046D218AC397F65532ACC7800246ED1C8094FC807306BF88E2816AD13B06F2898CA87C486A124B618156A090B1058722ABAE389AB5612CA2C2766DDEF98202A6AB1097B392404EA151788528B07544325F851B4DEAA2495138F929BBB4026042B0A8CD3CB0A7D061927A717D4877E0D9A409D6B125361C99090AFDF922A776ACADA2B6A84522134B089D4B428020C83061A87816C6A59263E636B5B2ECBCA6A64E29600948D5B0B45600B8D473A65B450B766D0251B6915898BC3C1C2C53B9679121F1F06CFB9604DE0051FF4B093939C907AB18C2988646A90481BB99F4153611C138BE34BE163B3ABAC44354A774E9CB54FB29903367C78D275467499D22E83A11CA9B8445BE9DF3CB612069222A8715A495D115B4BC2457AB731AE7EC1BD8EC9722CA980958180AC2BD67898F4A72A675106D66981B2E923C0BA40E3234655D00B25D6462591C9C9C7A53491489D57A77B2510D08B95B9C61C1784BA752F4A73023742ECB985DFB37808B16D6C283CD4A06C5A3AC401855E1DABE63F9668BF7A661946B18230A1A5A7C19DA66ED08151E77A624F579D4E44ABE023A1CD33459FCC3F1A6589426634D062D0A75A387A0B7B8D802A66B2106E01264500915B97307C85ECF331BCAC35E4AA243C837876D858AFA8B510C342708B38093B2CD35D1BA68DA0544794D172C6CA8850A7F847B56998D8E0B0A17144FB6F443E3679767CA91B80A6CAA8BB0E22BBAC01C0EAE1604B8A243911672B3748C7F18C531E3783D522039130057198D6F0989E99641AB718DA123710BDB67B3B75EC66BA9CF459FE06C7C4F7959DD7281FF155940B09FB14AA55CD40B963CA3312C05B36A5207C989428C16E5D288ADB18A66F74617CA39DB8AA612D706DFEC884C457AECD1AAB598195B4AC971529FB7A883492235E62112064A0F6FF5BF4F1619A0D03B96B5112009966B2DF7C2F300B6F295DF7FA2C453E1949DF6405309DF7575C7656C245EDCA9F6")
+        let _pk_: [u8; 384* K +32] = hex::decode("F255CE47334283B8622BE7CE76D7354E3C4FE3F6C44F6BB25C9864EE0BAEB5765950D88F438263CE8B5A7A4C0FC4C95F10C477A7521F9BB458B8AA55D2E43BDC86B72F0930EE428B4C5A9C7116310F2AA5CB03AC1603C811959EA9012D69CBCE40B37CD890999CC74FF375C66F048B240363343CB795998856D560F4C712938C79466864D20B0BE95419C9EA6A8E7203A1986D10B606691242CEF630941B116458A41C83B7DC5B06A97C840B116F2CE9CFA87A1C1AA8C4FAC137DE8498E8749B3638404271539B247183A32E7E4413B6400E0F295788084EEA93B4A7653341005672D908C62B64B11B48414B505F3036EE56CC4DA88FEF27B2DA974C9DD38C150090B5B8A29BD7C5975A8A959549044B4DAED52A7FA68335308F40C9B768C5821F78CF068A694978964F597408D09759A19578624C64DC18EAB23082E599EC488DFE016E4BA58977E15B715C612496310219B9B4775CB51C5DF03B934F7473AA58A57C602CF17C5993D30F52D753AC56BACA1A994742BC50435E179A262B3C8EECE1513955C593E7508B945F6E95CC4268CBD45B2504082FB8B23D8906946A74AC2FB676BDBC39DF76B9B8450F49D283C622784565B76B96084DFC099EC2279E5BC13492561B4439E32324B0050C5FE6451974BF0D72750AC58BAC046D218AC397F65532ACC7800246ED1C8094FC807306BF88E2816AD13B06F2898CA87C486A124B618156A090B1058722ABAE389AB5612CA2C2766DDEF98202A6AB1097B392404EA151788528B07544325F851B4DEAA2495138F929BBB4026042B0A8CD3CB0A7D061927A717D4877E0D9A409D6B125361C99090AFDF922A776ACADA2B6A84522134B089D4B428020C83061A87816C6A59263E636B5B2ECBCA6A64E29600948D5B0B45600B8D473A65B450B766D0251B6915898BC3C1C2C53B9679121F1F06CFB9604DE0051FF4B093939C907AB18C2988646A90481BB99F4153611C138BE34BE163B3ABAC44354A774E9CB54FB29903367C78D275467499D22E83A11CA9B8445BE9DF3CB612069222A8715A495D115B4BC2457AB731AE7EC1BD8EC9722CA980958180AC2BD67898F4A72A675106D66981B2E923C0BA40E3234655D00B25D6462591C9C9C7A53491489D57A77B2510D08B95B9C61C1784BA752F4A73023742ECB985DFB37808B16D6C283CD4A06C5A3AC401855E1DABE63F9668BF7A661946B18230A1A5A7C19DA66ED08151E77A624F579D4E44ABE023A1CD33459FCC3F1A6589426634D062D0A75A387A0B7B8D802A66B2106E01264500915B97307C85ECF331BCAC35E4AA243C837876D858AFA8B510C342708B38093B2CD35D1BA68DA0544794D172C6CA8850A7F847B56998D8E0B0A17144FB6F443E3679767CA91B80A6CAA8BB0E22BBAC01C0EAE1604B8A243911672B3748C7F18C531E3783D522039130057198D6F0989E99641AB718DA123710BDB67B3B75EC66BA9CF459FE06C7C4F7959DD7281FF155940B09FB14AA55CD40B963CA3312C05B36A5207C989428C16E5D288ADB18A66F74617CA39DB8AA612D706DFEC884C457AECD1AAB598195B4AC971529FB7A883492235E62112064A0F6FF5BF4F1619A0D03B96B5112009966B2DF7C2F300B6F295DF7FA2C453E1949DF6405309DF7575C7656C245EDCA9F6")
             .unwrap().try_into().unwrap();
         let m: [u8; 32] =
             hex::decode("5BD922AF345AB90F297D0A82EA39527A648E4977AB56242E2AC0ED9A2CC66F10")
@@ -398,7 +407,7 @@ mod mlkem768_pke_encrypt_tests {
         let r: [u8; 32] = hash[32..].try_into().unwrap();
 
         let ct = pk.encrypt(m.into(), r);
-        let exp_ct: [u8; 32usize*(DU as usize * RANK + DV as usize)] = hex::decode("4EE24D9E0858B36DC755A9389F4FDBF438DB8FBFDDD2E2A41FBFE7313693E87B2BD86A2A5C95286840A2E477F4AAC12F28319D892C30FE9A120A09713369A17D5EC459C7E5DCD402F9049BF6FF0F7D07A7F18D4C1E3E0429BF6D501EEDD33E114423A5C4692738096101EC79233F20C58A6EA7E855C4E608DA7C9EE086EEAFE296F3214BD0B9264AE18069342AB493BBEE267401FEDAE19D5F9224A11D911505CB3200C65F17C91F88FBE25621402C939F071C48D6BC6ACD207C8C215E2FF23AB5FAD94F2CE61003C99DE15195B36ADE08864043CAEA49D4EA1D550978C49455B06AFB4BA4F0C178D30F953D47F0258370FE8E686802085FDCB25598DE439CEEA186F848AE2E4ACF526E03755D0A89A941A08C5610C96DFB3F47C693E7E899E1DD38DFD9126F3D05751234ABB82D2BBA4D347823B97293AE2B58FD3C71D2216797DA1CA453D600C5A9A6B36CA23B9450894A894A42C40B38871F1E9E84B40A04112CC9A4B6E7B8DE59CAE5D8389687DBB1EA078F3CC93DC5D0788A671530D9FFDE5F2CB6A558AB38E038D59ED1EF1FEE381AFB6DE0A77E1333FC5B0FE3EA2DCDB84FB33795449AC6DC322F4E5E09B2A462D3750BA426C04271903CFE9A3F02221B69E474F24B7DB608492C01AAC3F2FA472A2469B6A8A949A67C567D139D6F40B00DF1AAC1E6456FFAA646E0DEBD79907905F28076F78ECB3DD1A6493A40F3D1F8D89C71AD15D22162264D0AA73581AF7A77EEA43B856370182348034810E60A902604B724E09EA4638AAB039982A64EF02C9C21259A381BFD3BF298EFE4285CB538F79BE01CCEE1A4A903A80132942AC6BCD4425BD197EF014E7DBEFFDFDD5AAD00DA2A5E8DE4FFF1E8E97F23F3F4BE38970AC09CB99D252CF2736059CFDE177EA6B36EA329B9DC541C3DCE61FAC504908857184C936C1A1C4AC0C8DDE9A66B4F3AAADEAB2DBEB2F2E6422A49A6B9C223DF25A34720717253DA6DCFC0A825553A1D2884E01A97060886FC30A1AD50E52C46F6F9B87274AD6369FCE4FDF3FF6A5D62D4AC82CBCECE902E4DE4214B71A2CA547C536380DCA26F63F2BE71B01EAC68F42AD1399D390404AA5539A5995254836FE6CF59C490B13CAC01C69E50CDC0EBA1C2F9978F4223AA38DA33639ABE933B40F6E2751515EFAC9896465041D3922A4B043897083F7CC6DAF1FD87B970BB6D1D5E48B599FE6CD2AFBA5FCE17E4BD4B0217E879FAE34FC227EC132D6F7141A48D14DED57729164A1D2B0BEF89A16244EE114AB4E108648B7E80A7DD502B0DBD0C38AF1D85AF6966BFB8E54237000A3F18C48EFEB93ED62B41A9B341361D0D7AE75D63A3A34DCEE329996AB0630553F38BC0DA148419162A31D386745C818E2691411A7927E49822AAE9EA918BF49D6809290B57C1BA5EC212F135AC0B8EE945C0510CFED4DB5A84B617BA1525E996486728E1DB87B6E99CC9A7EC4399B063D3943FE4EB1933E90365A4916CA8D67D064DF7D5B8DFC51E337247CAC3CFFAEDC5523276CDCB82B130D8E1C3FB6D7D69").unwrap().try_into().unwrap();
+        let exp_ct: [u8; 32usize*(DU as usize * K + DV as usize)] = hex::decode("4EE24D9E0858B36DC755A9389F4FDBF438DB8FBFDDD2E2A41FBFE7313693E87B2BD86A2A5C95286840A2E477F4AAC12F28319D892C30FE9A120A09713369A17D5EC459C7E5DCD402F9049BF6FF0F7D07A7F18D4C1E3E0429BF6D501EEDD33E114423A5C4692738096101EC79233F20C58A6EA7E855C4E608DA7C9EE086EEAFE296F3214BD0B9264AE18069342AB493BBEE267401FEDAE19D5F9224A11D911505CB3200C65F17C91F88FBE25621402C939F071C48D6BC6ACD207C8C215E2FF23AB5FAD94F2CE61003C99DE15195B36ADE08864043CAEA49D4EA1D550978C49455B06AFB4BA4F0C178D30F953D47F0258370FE8E686802085FDCB25598DE439CEEA186F848AE2E4ACF526E03755D0A89A941A08C5610C96DFB3F47C693E7E899E1DD38DFD9126F3D05751234ABB82D2BBA4D347823B97293AE2B58FD3C71D2216797DA1CA453D600C5A9A6B36CA23B9450894A894A42C40B38871F1E9E84B40A04112CC9A4B6E7B8DE59CAE5D8389687DBB1EA078F3CC93DC5D0788A671530D9FFDE5F2CB6A558AB38E038D59ED1EF1FEE381AFB6DE0A77E1333FC5B0FE3EA2DCDB84FB33795449AC6DC322F4E5E09B2A462D3750BA426C04271903CFE9A3F02221B69E474F24B7DB608492C01AAC3F2FA472A2469B6A8A949A67C567D139D6F40B00DF1AAC1E6456FFAA646E0DEBD79907905F28076F78ECB3DD1A6493A40F3D1F8D89C71AD15D22162264D0AA73581AF7A77EEA43B856370182348034810E60A902604B724E09EA4638AAB039982A64EF02C9C21259A381BFD3BF298EFE4285CB538F79BE01CCEE1A4A903A80132942AC6BCD4425BD197EF014E7DBEFFDFDD5AAD00DA2A5E8DE4FFF1E8E97F23F3F4BE38970AC09CB99D252CF2736059CFDE177EA6B36EA329B9DC541C3DCE61FAC504908857184C936C1A1C4AC0C8DDE9A66B4F3AAADEAB2DBEB2F2E6422A49A6B9C223DF25A34720717253DA6DCFC0A825553A1D2884E01A97060886FC30A1AD50E52C46F6F9B87274AD6369FCE4FDF3FF6A5D62D4AC82CBCECE902E4DE4214B71A2CA547C536380DCA26F63F2BE71B01EAC68F42AD1399D390404AA5539A5995254836FE6CF59C490B13CAC01C69E50CDC0EBA1C2F9978F4223AA38DA33639ABE933B40F6E2751515EFAC9896465041D3922A4B043897083F7CC6DAF1FD87B970BB6D1D5E48B599FE6CD2AFBA5FCE17E4BD4B0217E879FAE34FC227EC132D6F7141A48D14DED57729164A1D2B0BEF89A16244EE114AB4E108648B7E80A7DD502B0DBD0C38AF1D85AF6966BFB8E54237000A3F18C48EFEB93ED62B41A9B341361D0D7AE75D63A3A34DCEE329996AB0630553F38BC0DA148419162A31D386745C818E2691411A7927E49822AAE9EA918BF49D6809290B57C1BA5EC212F135AC0B8EE945C0510CFED4DB5A84B617BA1525E996486728E1DB87B6E99CC9A7EC4399B063D3943FE4EB1933E90365A4916CA8D67D064DF7D5B8DFC51E337247CAC3CFFAEDC5523276CDCB82B130D8E1C3FB6D7D69").unwrap().try_into().unwrap();
         assert_eq!(ct, exp_ct);
 
         let ss: [u8; 32] = hash[0..32].try_into().unwrap();
@@ -412,7 +421,7 @@ mod mlkem768_pke_encrypt_tests {
 
     #[test]
     fn test_encrypt_02() {
-        let _pk_: [u8; 384*RANK+32] = hex::decode("3543CED7C2159F7734C9C5234B0050177B8E5D4022F40B3D2BBC8DE8B9A2422C711FE97C17BB7078321EC81C8204F682FABC3614120853D29AE9C1A3811B4E422836BC021A4F6ACC9F06BC3867B55D98589AF51A9F64103ED244A12B82BEFABED58AA11511AFE711AF87F06DE3463E5AAC6EEDEAAEB012CF77128461CB5B38840381A08E0A8119A0EA9302D48488053DD7550F7D3CB2507A6F69E186BED53D72276C517B3A4AE90E74C24CFB09C79E72BC188389F657B9F9C6BB8E5A7AE3832AF4453CDC4337CA9B029F91BD6F4735E5BA6FAAE805F11779DDA19BB1E81BC9F7207F9C4F58A795600C2A8ED03876D3729622605B2C13AE72065D077631C7AEAB226B7111C926A7C0B35AA9CE208F3020111CA6266C91A138A9CE7911BD641621E9CB3CB0941E343588068A4992B0A6954BA5D498545CF62C5A201558CCA2FE9514EC92043D2B013E254FC5F3A18880120901B63273BF99810DA49A56780612DB98894396C449F0CCFDA915BAE829974A157D09729AD90918FABE51B72D49134741B0C97429A558359E0642388A503D5E309E2371B2663327B1A7498376AA4F1AB0D320B4D2852EE9EC28825C9C9F4287A190BCCB170CCA897D08C90B2C186AB7F23309F274D7959D2C1003FA8333A1491C5C645F34C094FEFA104E554CDFF63EF955ADD55A9CE5753A150C6D9BFA382541B984103DC78B662D114BEA830E95134158CBB854310CAE406BBCE4CE82B7257C330E8B113790954BF19CBA1FC25828EC06E17C73E135CDF5748490681F7BE052EAB149912528B2004B2B02725852C28E8B566291AA02C1A410717987B22B3D29B5DA9363B63B33F4108C6783186236288A31BFF07482C189AA4C4C5F4B6024C388CBE049A02CC0A6CB52886A25B9B9423AA4716D0F65308D61CA33649884CA4910A00D9F8B6D56DB719E470291DA6802F57D452531FDE36ADAB00450C3735CB8C0484BA8F6E8A939819FBB9AC548905E13458A278579A6E5160950846BA1A9E4D62EBDEB8C8F9B1CA26C20F76BA90C5679B2BA4D8EE4B963557DB1E8C891729DA1F421FF20C42261654E753C63A39DC7B9094A20AAA3E29DF29327AF314576A8CBDC5AB55B8C4B91DB1DF25304E808B677FB9FA2F82D15A957CD8485DD5A35999B992CE428795897C1BB18DF01C0DE2B0D45620F31D820B41282C4D98D95825AC52B11310A1EEBCC6724D4BDF7A3B69A1C1D63047969A058FBEB926F68696B6761F4F66B3D7A31878006901853C58128C9CA6A911764A244A290F96D00DC38343244803BC647C6152FE9BBD0CB82A4467AA4D25CE175C08009B867F60D9A32138D3864F719A2B798987430C0C7326D3BEB3F895472B2D054030366111CC2DEF60C7800CE3BDA023A062BC2351393AC44DFF30B49E60F907404562159B5077B31E6675D905CC7C1CB4CD64B2AF5AFA50CC387C333AEC7CABA219CB4C8A8952B429A1BCF05D78EC65A908436256F46114A19AF2F1A0EAD0C12AED4171EF653F3D2802749C618D70006D68664EAB3B876B48FC298256577CE34AB5127CEE03433B2CA9B403C0A39B02657180C829684A7A58458487E00143CEFD5AFFEF316F2E716B0B42416975E44A63EC62269966C6C71F9B01C5C839BC3E778ADD880E2126F8776B0264707617CD467E982E2DEF5E1")
+        let _pk_: [u8; 384* K +32] = hex::decode("3543CED7C2159F7734C9C5234B0050177B8E5D4022F40B3D2BBC8DE8B9A2422C711FE97C17BB7078321EC81C8204F682FABC3614120853D29AE9C1A3811B4E422836BC021A4F6ACC9F06BC3867B55D98589AF51A9F64103ED244A12B82BEFABED58AA11511AFE711AF87F06DE3463E5AAC6EEDEAAEB012CF77128461CB5B38840381A08E0A8119A0EA9302D48488053DD7550F7D3CB2507A6F69E186BED53D72276C517B3A4AE90E74C24CFB09C79E72BC188389F657B9F9C6BB8E5A7AE3832AF4453CDC4337CA9B029F91BD6F4735E5BA6FAAE805F11779DDA19BB1E81BC9F7207F9C4F58A795600C2A8ED03876D3729622605B2C13AE72065D077631C7AEAB226B7111C926A7C0B35AA9CE208F3020111CA6266C91A138A9CE7911BD641621E9CB3CB0941E343588068A4992B0A6954BA5D498545CF62C5A201558CCA2FE9514EC92043D2B013E254FC5F3A18880120901B63273BF99810DA49A56780612DB98894396C449F0CCFDA915BAE829974A157D09729AD90918FABE51B72D49134741B0C97429A558359E0642388A503D5E309E2371B2663327B1A7498376AA4F1AB0D320B4D2852EE9EC28825C9C9F4287A190BCCB170CCA897D08C90B2C186AB7F23309F274D7959D2C1003FA8333A1491C5C645F34C094FEFA104E554CDFF63EF955ADD55A9CE5753A150C6D9BFA382541B984103DC78B662D114BEA830E95134158CBB854310CAE406BBCE4CE82B7257C330E8B113790954BF19CBA1FC25828EC06E17C73E135CDF5748490681F7BE052EAB149912528B2004B2B02725852C28E8B566291AA02C1A410717987B22B3D29B5DA9363B63B33F4108C6783186236288A31BFF07482C189AA4C4C5F4B6024C388CBE049A02CC0A6CB52886A25B9B9423AA4716D0F65308D61CA33649884CA4910A00D9F8B6D56DB719E470291DA6802F57D452531FDE36ADAB00450C3735CB8C0484BA8F6E8A939819FBB9AC548905E13458A278579A6E5160950846BA1A9E4D62EBDEB8C8F9B1CA26C20F76BA90C5679B2BA4D8EE4B963557DB1E8C891729DA1F421FF20C42261654E753C63A39DC7B9094A20AAA3E29DF29327AF314576A8CBDC5AB55B8C4B91DB1DF25304E808B677FB9FA2F82D15A957CD8485DD5A35999B992CE428795897C1BB18DF01C0DE2B0D45620F31D820B41282C4D98D95825AC52B11310A1EEBCC6724D4BDF7A3B69A1C1D63047969A058FBEB926F68696B6761F4F66B3D7A31878006901853C58128C9CA6A911764A244A290F96D00DC38343244803BC647C6152FE9BBD0CB82A4467AA4D25CE175C08009B867F60D9A32138D3864F719A2B798987430C0C7326D3BEB3F895472B2D054030366111CC2DEF60C7800CE3BDA023A062BC2351393AC44DFF30B49E60F907404562159B5077B31E6675D905CC7C1CB4CD64B2AF5AFA50CC387C333AEC7CABA219CB4C8A8952B429A1BCF05D78EC65A908436256F46114A19AF2F1A0EAD0C12AED4171EF653F3D2802749C618D70006D68664EAB3B876B48FC298256577CE34AB5127CEE03433B2CA9B403C0A39B02657180C829684A7A58458487E00143CEFD5AFFEF316F2E716B0B42416975E44A63EC62269966C6C71F9B01C5C839BC3E778ADD880E2126F8776B0264707617CD467E982E2DEF5E1")
             .unwrap().try_into().unwrap();
         let m: [u8; 32] =
             hex::decode("87B25E0AFC6E9D186DF7DA6C3D9E048E1B16C990866367BD903C779266CFD537")
@@ -432,7 +441,7 @@ mod mlkem768_pke_encrypt_tests {
         let r: [u8; 32] = hash[32..].try_into().unwrap();
 
         let ct = pk.encrypt(m.into(), r);
-        let exp_ct: [u8; 32usize*(DU as usize * RANK + DV as usize)] =
+        let exp_ct: [u8; 32usize*(DU as usize * K + DV as usize)] =
             hex::decode("8DC7D4F120658976B15D3C35E427D16592F751214F771E678A32BDD0AE0A60C59143FA54AA101EA2757134378D5127A3D37AA814B801C6315183FA7692D0939B756D6835F847D64E8141B97F9A8AD5C028C3CC6574B2EB60C48F40FDBF0341CC2C5EAAD543D0B0881C51267E52E855414ED37924F2275E011D18DCBAEF20AD3ADAFD0F60D82083DCC352174D625C8CC1120DC1BA4D36F34206074551ADF8F4624CEB60563C6D4AC015ED814F3B520C68F650EEB02A38AE2191AFBA2D6F39E53F34EF8D6E5FA32214EE7B924BEFE1C0956EA77C00EB7178DE11DB5E8747EBE92466491133D711BD141C99549CD59A58CE30DBF759C9EC8851279514EA6F0CE209FDAF36866018E0117C3AAD232FC79615257BA51D70AE1A3B173D6F03BC3C010B6A292328B9FF67622A72DDD409FCA24F2774D7E506998DB6704C96FFEACF8961A6D0783277E076F687088C08C66CDBC34AE9E5AE13F43C81E17EDE3F2DECB2471730150E7113037F5CD20F049CC15AD918D1127DF7E9E92E794F0E90F6866033136AA5BE7A23056E0010E46C5AA30982B8F905F785FE6BEA752847D64656A34D408FC8E37216EB7CC387E0EDF1A216C015C890B5835940ACE44A3EC7FD7A832CAB354052857A4204488D78F7EA1B421A4A16C030E5B34FFB8E6EB57CB21BAF746CB1BCC6CECC9A80FF694FE9C121D611C210B15F0AE2FFE0CE2856CE469474E374E6D9924718F12F8CCEAFAF090C84B14420AB8A09CE2EF53F76FB7EBA985B812D7B54D0704169BC9EAF5DC6490FA183CA78FB2EA5F9463B6F1C7FFEDC6213AE8B813F861B130A4876F9DA32C77B819733D58B0830F49FA237099AEBF2711C6C3EAFD4846D3CDFFDFCD3D9A2AE56DBBA4D9304AEDE0F53B12451425BAB5CBB76ED79FA13E7749E1537880A951F9D803E3439F0A843C0BA26313E44D458CB68771187DCCC363555FCB18C15DDA69F39F90FF0F8588632371170ED76B398D8E36C5EBBAEE40656C241BFA47DC914B8CFB9B4011F357B667B3E7EE68B66FB006192202A3D5FF44528BF3CE81A98922980C5C81E9AC05A860C5AFC73B9AE95ED5A0DE7E2AACA24BE1FE5B81EFA2D936CE86BF846AD7C30775F7EE7E3728510754E363292CF5E68E64164A58E8C874C868AE51F5E5A9FA7BD8BA9F30585E85DD37F4BC24E87FEADA9D7277B65DD53BE0059C1E01AD40A79D95A0F99B1D7CA2A1CC87D4053692F7422036E6EFFAC4B1E691156EC1C3F5EEDC52E598A2A91CC1FE926BB4D977A8068BC5DEFD378B1C19B8B2C865D2287B9DDFAA16D37B7EFA09F8CEF1968D491702F8F4B85BA9E7EAF90C7CB634FCBA21B46F53CF02C72474F1FF8D1484CF6BDBF640B54FB86E9F2829A96DFDD8DE9C362ABEF65A6A8E619F4F70DB8B9C0B57CB904D5F4760961C911458DCFD6A9470D563DEB107DCE157747941B2A034FAFDA07F3E4237AB439C8E7D188CC360C907038EEFB0D2DB48B50F2D07D0EB5EB8A51247CDE6A0B7DEBAC3C79E0DA2B471431599396885420ABCB0306B2118C").unwrap().try_into().unwrap();
         assert_eq!(ct, exp_ct);
 
@@ -450,7 +459,7 @@ mod mlkem768_pke_encrypt_tests {
 #[cfg(test)]
 mod mlkem1024_pke_encrypt_tests {
     use crate::keygen;
-    use crate::params::{DU, DV, RANK};
+    use crate::params::{DU, DV, K};
     use crate::prf;
 
     #[test]
@@ -479,7 +488,7 @@ mod mlkem1024_pke_encrypt_tests {
         let r: [u8; 32] = hash[32..].try_into().unwrap();
 
         let ct = pk.encrypt(m.into(), r);
-        let exp_ct: [u8; 32usize * (DU as usize * RANK + DV as usize)] = hex::decode("f6581c38f9612a7f09363abef48d5cd274b19395c4c008b4257307c1d538343f9849e27128dd9da7c6b92f4c46af5e675351d3310aa3d1ce523e6b30f52ac1555f48aec7b073d29100f7290f80ded69129770e62b9638b35019d00de7d1d746fc5098a7a938ac595c1a7a3c50152fd662ef7f39b4ee0593a9dc04fb2f42d3a48a65b18ba9cf0dcd54873aeb92311b139bc6aab5802b97f6b962c8797de1bf4285b535bc06ebcf6e9b5df830d0500347ac2886a3b4d8de243f967507e94cc4c6540d93b884540588a374f5334c455766203192c56474201cc4b9f5c095ca2f750538f8151b96e5f06ba7a0ec894f9e97bd7d25ec83857a19568c3257a5f17c1533a471b71e8b832a1b71f5a287e0eaa4dc5c0ae136bda4cb31d95431f6a5614a690c872d52537cccd94142ab61718e30f6bb387c74c5ffb5ee00be818dbafa4a67b74cf4c0d3c9ece309e98f61de1a29d9e6699ae16068cead024a11ee86cb08ba324cb468d9d2016f62574304f85f85a3b582586d391988804ab6ad8af38ecf15296b4865c86091142618b30f037de5bb3306203681a660485fe5449481048b412cf96780d646c5656c7d9dc0f9722fd9e8f5ebb81974ccbb72bd66e69c0f5648ea73615a34740338552f804b2b856d0c59663504c3d82efe3204586e942cb6179e34e723a52b856b3d730942c57949677fcdd56be139e802d232e402b0fbc74ee55f7f15bff5584369813544e179e6aa7b60090118a987d6df2788ad35b78fda6947052d6c907432774004d519a966a6fd741d56d86c66040ea0057e439423fe0726d8382cd34c4eda3b5c520a6757188fbd9857187a4742155a1f44791a5b001cd599016b2e4d97bec68a38a448023a32af993ab5b623b63fb34485fe3a3fe4794faa50e88bc4d1ed55ed784e1ccd1d900902e4b4d24761f531e81918a95afee8aa1031a0727c22701fad67e9fb03e54a7572ceaf6c0ce1f36468056be2a24752a4160c758c5b401cdfd40dd04766ea6428142796fcf844ed14452236e50563fd97c11dfb5386308e685d2887ca2a8939b621a7c1c44d20ff21050dcba569386c9457a025c2830f639d279627bcff5601fe39b986efb636d57f3bac3eb01cd643c2646695ada693438f26e93ea21d7ccc7de976f89e37dbea211fcb800997d22f52b641517407e494f963a770fd8e7a5569bf88c0286fff7c62b4c8e61f71d7e8558019f671bba6c0a8758852c1310ff575a4a6c4e4aed1021f9f8edcae3007a9d925093e73e071bbf8e642cce37ef6bb9d69a6a0ea0be64df4a450c332fa0f2e0049db0f69a3f97bf70c6c57948ffc6ae8cffd379ec8471d7b6b031d472bd03ab88a206010b3f9ebbe64b6fa210f3879cda2b5fd6cbfd6736900e38fd5bcdd8d4d88c4eaab41ccbbd332ce0c2bd83b57c86e9ef48ca707ca6ac80de0be2f4dd9edcac05d13d12030370563873ef5f56d25e02404039f063dc30b020e84a597d2429d3c527867d6f15aea106e9384165f850b78c8b88fcfbc754a7bab00544578f3ac5d16f5dc9e296e46b57820f6575b0b9c76685f2c1b29ab97d222196e3ca0146352d2e4371837ba52d76e4e915b9e17e0e9ff54066d56a447d26e210790d6cfce69e1f1a766cc4a18f533c680018e35da0450e5ee7966a5100abea6ab910600eb55bdda10343090f995b96b4eee34ea783d06c838f8452379bd4a65480250faf7990bd34e03088e255548ea9af938f745fe4578cacfd2697e7eb8732de16f3812fed0bf94e259b8bc5ec133d62b87df95b8d10b0ba6156d0d842c3562d3e98fd86070020bf2987a8e2dc104d5dab6ae85a78808167d6c79b3e1b314df6b7e4053162be814ccd035612e7deeb1c3ca992a8d1ca8724061fcbf403371efcc2094e6fcfee1fe59ba52ea47323ecc8b23a257088ccf9a4fa8a2830cc8fb1ba7f3410ca5cba9ff1a65d51a41ffed675825c099bc78d3d7e82de00cad6108ab9a7869f304a87391342bc6a612cd8d5e6026735e984ecd3302780d7cc09d75b89dd9f0e6b544bdb4defcc317c0961fcf7763530b778fd81a5210dc26342fd7f6755c360fcbae22f4793ff20004dbc828b362b3883fbe4929bf51ee9ecb50aff78d4ecb4d83d588ca80b24e6e4479a8bd17311fcfd0eaa86e2fdaf70b3251c0622a35ac0fa64e814a471db896456f3fa4eb2fcf873aced8a1d40c1acd69e430c71").unwrap().try_into().unwrap();
+        let exp_ct: [u8; 32usize * (DU as usize * K + DV as usize)] = hex::decode("f6581c38f9612a7f09363abef48d5cd274b19395c4c008b4257307c1d538343f9849e27128dd9da7c6b92f4c46af5e675351d3310aa3d1ce523e6b30f52ac1555f48aec7b073d29100f7290f80ded69129770e62b9638b35019d00de7d1d746fc5098a7a938ac595c1a7a3c50152fd662ef7f39b4ee0593a9dc04fb2f42d3a48a65b18ba9cf0dcd54873aeb92311b139bc6aab5802b97f6b962c8797de1bf4285b535bc06ebcf6e9b5df830d0500347ac2886a3b4d8de243f967507e94cc4c6540d93b884540588a374f5334c455766203192c56474201cc4b9f5c095ca2f750538f8151b96e5f06ba7a0ec894f9e97bd7d25ec83857a19568c3257a5f17c1533a471b71e8b832a1b71f5a287e0eaa4dc5c0ae136bda4cb31d95431f6a5614a690c872d52537cccd94142ab61718e30f6bb387c74c5ffb5ee00be818dbafa4a67b74cf4c0d3c9ece309e98f61de1a29d9e6699ae16068cead024a11ee86cb08ba324cb468d9d2016f62574304f85f85a3b582586d391988804ab6ad8af38ecf15296b4865c86091142618b30f037de5bb3306203681a660485fe5449481048b412cf96780d646c5656c7d9dc0f9722fd9e8f5ebb81974ccbb72bd66e69c0f5648ea73615a34740338552f804b2b856d0c59663504c3d82efe3204586e942cb6179e34e723a52b856b3d730942c57949677fcdd56be139e802d232e402b0fbc74ee55f7f15bff5584369813544e179e6aa7b60090118a987d6df2788ad35b78fda6947052d6c907432774004d519a966a6fd741d56d86c66040ea0057e439423fe0726d8382cd34c4eda3b5c520a6757188fbd9857187a4742155a1f44791a5b001cd599016b2e4d97bec68a38a448023a32af993ab5b623b63fb34485fe3a3fe4794faa50e88bc4d1ed55ed784e1ccd1d900902e4b4d24761f531e81918a95afee8aa1031a0727c22701fad67e9fb03e54a7572ceaf6c0ce1f36468056be2a24752a4160c758c5b401cdfd40dd04766ea6428142796fcf844ed14452236e50563fd97c11dfb5386308e685d2887ca2a8939b621a7c1c44d20ff21050dcba569386c9457a025c2830f639d279627bcff5601fe39b986efb636d57f3bac3eb01cd643c2646695ada693438f26e93ea21d7ccc7de976f89e37dbea211fcb800997d22f52b641517407e494f963a770fd8e7a5569bf88c0286fff7c62b4c8e61f71d7e8558019f671bba6c0a8758852c1310ff575a4a6c4e4aed1021f9f8edcae3007a9d925093e73e071bbf8e642cce37ef6bb9d69a6a0ea0be64df4a450c332fa0f2e0049db0f69a3f97bf70c6c57948ffc6ae8cffd379ec8471d7b6b031d472bd03ab88a206010b3f9ebbe64b6fa210f3879cda2b5fd6cbfd6736900e38fd5bcdd8d4d88c4eaab41ccbbd332ce0c2bd83b57c86e9ef48ca707ca6ac80de0be2f4dd9edcac05d13d12030370563873ef5f56d25e02404039f063dc30b020e84a597d2429d3c527867d6f15aea106e9384165f850b78c8b88fcfbc754a7bab00544578f3ac5d16f5dc9e296e46b57820f6575b0b9c76685f2c1b29ab97d222196e3ca0146352d2e4371837ba52d76e4e915b9e17e0e9ff54066d56a447d26e210790d6cfce69e1f1a766cc4a18f533c680018e35da0450e5ee7966a5100abea6ab910600eb55bdda10343090f995b96b4eee34ea783d06c838f8452379bd4a65480250faf7990bd34e03088e255548ea9af938f745fe4578cacfd2697e7eb8732de16f3812fed0bf94e259b8bc5ec133d62b87df95b8d10b0ba6156d0d842c3562d3e98fd86070020bf2987a8e2dc104d5dab6ae85a78808167d6c79b3e1b314df6b7e4053162be814ccd035612e7deeb1c3ca992a8d1ca8724061fcbf403371efcc2094e6fcfee1fe59ba52ea47323ecc8b23a257088ccf9a4fa8a2830cc8fb1ba7f3410ca5cba9ff1a65d51a41ffed675825c099bc78d3d7e82de00cad6108ab9a7869f304a87391342bc6a612cd8d5e6026735e984ecd3302780d7cc09d75b89dd9f0e6b544bdb4defcc317c0961fcf7763530b778fd81a5210dc26342fd7f6755c360fcbae22f4793ff20004dbc828b362b3883fbe4929bf51ee9ecb50aff78d4ecb4d83d588ca80b24e6e4479a8bd17311fcfd0eaa86e2fdaf70b3251c0622a35ac0fa64e814a471db896456f3fa4eb2fcf873aced8a1d40c1acd69e430c71").unwrap().try_into().unwrap();
         assert_eq!(ct, exp_ct);
 
         let ss: [u8; 32] = hash[0..32].try_into().unwrap();
@@ -517,7 +526,7 @@ mod mlkem1024_pke_encrypt_tests {
         let r: [u8; 32] = hash[32..].try_into().unwrap();
 
         let ct = pk.encrypt(m.into(), r);
-        let exp_ct: [u8; 32usize * (DU as usize * RANK + DV as usize)] = hex::decode("6679b55fe6904e4c0d51247214ac1b4405a65101096761af59402dce26603448254b4e264756187b2a9e22b25e1619a8ca3bdebd65c53067a94e05f84f0d1717e6470ad3d746e5ee4cf2efea2e7ede5b7d07ffc81a5aef2c5f391648a1992a03e3904ca10f81351aef03ec8a6ce513de7a502279378492f740b39595e1bf30550e3926098524bad36ffdd77fad5c15a3233c09fb5049788d393ab2006766387e88df20e66dfdd9ad71c616491e681dc1d211989dbf81e336cc5e0a3456f54e1bca1139005e48a3128a26bcdd511b585a1cb584d4bf27a509bcfa61a4e635f4dc0d7d112c55cf9bedc4acb6b0cec82284bc5061a143f330472dcbdbc92f772736fed65882b3b970891bd717843a37b2468cb099c7d6dd97e233fce321dbf15fbff9ea20fe2303bcee1df458e93328134ee15a56c44cb6aaf21e20f9c872866873d6bfcf97e36cc18c2a82322af628bde165ce8bb92aa65e31b999459cd3f0a3e490746a68891fd4a94b80b65464fcd786a5a1f5ba8325b17d1ed24249280ec102487ba5d37366f3701a187349c299ffe9798fff340420a7fab2693b2dd3820bcc1bcc7fc31b4dc22f27ee10bbf26d9c456fbaf38ac7500780ecfe67fc8df68314f80abceca8ef1d5607b8b78577e5ca8cfd639a89b84116b26eb84fc5f5fa40165989f62f67bd1134a35b8cb2788fd5727305367963049fc73ea3249e9a587110759dfc569fa4186fde9be9faf6b6a4042540f7cd56b50a8c4ae41cbcd4d3a9207f2e9ba3773ca4d99b497c79ae6000d1bb107223ccc1636b7ed427e7a2338c9742594e638efc6124a7a8aa661bf0f3f4865ec95fa9b7bfd857fa0190334ee5fa8d9756b89aa233e6ff12762b11fce6c56e30ff3f335dd1329e3438d9fa0f187e1b02ccfe7a61887848b1f0e50d425f79db29ece92513976e3e823d2cabca84d6132390ce3ef2fe0c34c60ff8df7fdb5669b8963fd2b397a035a27ab30dc84110f3dde258934b8cdb70563782cbe588b832de828510b3c797c7509b26c3bba55db7154c95d091311ec2f2a7751b821210e5b73c036aff087efd1473d7f71e9dabfe9a2f080949fa419c665e89968ba931d1a758303b3cc34e3377a3c274a3f523329eb9c343d890842f0f230c7f106159e626095591c4eeaf427e63cca61157954cd89eddbeacd7883352150d24357e3d64046a852fc03d860a506ba9d9d202437d30f5b8b06203ced45440a3c91c250ba5ba04a8a263d10574a24d88b9e356b787e12766ddf3f9bc420ee0d7a46b6aff3f18b56787019f0ff71f4209b0ed53067b58125d01b49468bf082810974b128b4a6b7c380a307fe50372b7cafe5bfc1a0c178b5d26cf199313ebcd88629c9426f9990a7b746781f0736be9b4af4298d88e0ecb7842bb5f86cfd2e1f7f3bfc039bbb207976e76388b148a26d43803c08a21d289a4e1d371946f52d98fe9e0fe1a6ed6a45491c06a8b6427a14f4d7b38c704375950bfb0ccae45612f1c60f0cf89c3b63e8ed985ac7083befa6af83a64789eb60907502d92b0683021051181f44a23f8770efe01569942e35137e8091925e4215a20f0914e3d156d95d3d25789050ecadb559db6dd08e5b6939ee4449151a4542cbb8c3bdc9b6e6f167f62699ad6437ca4c2dc43d787ca29918b03c797f398e0716310a8cec1c5d02c099e7665e9651bb3451d4d720f39bb1be6cc868740133fa8b2654b2fcac3c1a4230ac9a39d25d2c28ed23a717b721e69079a142108ad45967ca4b5c2f340402acffe209ca450e9ce431bcf2d422e2347febedd136dc3cdb468b2f01b43b45694ed2fec3ab4f06a85ea74c752a3e12b64e218de94029be5d1969e5769cace27b846b3de945f641b81db1aa8a840dc5ff688f834c0a0d2d03a6abce23fccfd822e2aae4e32cc49257558da41636affeb566515067be0a8de900ebd2dca315def2d115353e6ec36c4e2e8212917c5592c7bb6a8ca1d7b674f947bff7e71389e276409e9e092b42d2b53d370ce6f4082e669ebb6be25485440ca01772a83e2cbeecdb945f59f12d2421abac939814f40d76575bd47f5b1540f5ccac85735566f4ae69e839cf98061842ab0b122931c43402c9524e1506c0887a3014639d3bde1e70c1d0b6e273f8ce055cd40220ef330a080280f0a86c1224c3755ea58921c7857b870d68e0e9cd68a079417cfb786b1ff929e7f26cdc7").unwrap().try_into().unwrap();
+        let exp_ct: [u8; 32usize * (DU as usize * K + DV as usize)] = hex::decode("6679b55fe6904e4c0d51247214ac1b4405a65101096761af59402dce26603448254b4e264756187b2a9e22b25e1619a8ca3bdebd65c53067a94e05f84f0d1717e6470ad3d746e5ee4cf2efea2e7ede5b7d07ffc81a5aef2c5f391648a1992a03e3904ca10f81351aef03ec8a6ce513de7a502279378492f740b39595e1bf30550e3926098524bad36ffdd77fad5c15a3233c09fb5049788d393ab2006766387e88df20e66dfdd9ad71c616491e681dc1d211989dbf81e336cc5e0a3456f54e1bca1139005e48a3128a26bcdd511b585a1cb584d4bf27a509bcfa61a4e635f4dc0d7d112c55cf9bedc4acb6b0cec82284bc5061a143f330472dcbdbc92f772736fed65882b3b970891bd717843a37b2468cb099c7d6dd97e233fce321dbf15fbff9ea20fe2303bcee1df458e93328134ee15a56c44cb6aaf21e20f9c872866873d6bfcf97e36cc18c2a82322af628bde165ce8bb92aa65e31b999459cd3f0a3e490746a68891fd4a94b80b65464fcd786a5a1f5ba8325b17d1ed24249280ec102487ba5d37366f3701a187349c299ffe9798fff340420a7fab2693b2dd3820bcc1bcc7fc31b4dc22f27ee10bbf26d9c456fbaf38ac7500780ecfe67fc8df68314f80abceca8ef1d5607b8b78577e5ca8cfd639a89b84116b26eb84fc5f5fa40165989f62f67bd1134a35b8cb2788fd5727305367963049fc73ea3249e9a587110759dfc569fa4186fde9be9faf6b6a4042540f7cd56b50a8c4ae41cbcd4d3a9207f2e9ba3773ca4d99b497c79ae6000d1bb107223ccc1636b7ed427e7a2338c9742594e638efc6124a7a8aa661bf0f3f4865ec95fa9b7bfd857fa0190334ee5fa8d9756b89aa233e6ff12762b11fce6c56e30ff3f335dd1329e3438d9fa0f187e1b02ccfe7a61887848b1f0e50d425f79db29ece92513976e3e823d2cabca84d6132390ce3ef2fe0c34c60ff8df7fdb5669b8963fd2b397a035a27ab30dc84110f3dde258934b8cdb70563782cbe588b832de828510b3c797c7509b26c3bba55db7154c95d091311ec2f2a7751b821210e5b73c036aff087efd1473d7f71e9dabfe9a2f080949fa419c665e89968ba931d1a758303b3cc34e3377a3c274a3f523329eb9c343d890842f0f230c7f106159e626095591c4eeaf427e63cca61157954cd89eddbeacd7883352150d24357e3d64046a852fc03d860a506ba9d9d202437d30f5b8b06203ced45440a3c91c250ba5ba04a8a263d10574a24d88b9e356b787e12766ddf3f9bc420ee0d7a46b6aff3f18b56787019f0ff71f4209b0ed53067b58125d01b49468bf082810974b128b4a6b7c380a307fe50372b7cafe5bfc1a0c178b5d26cf199313ebcd88629c9426f9990a7b746781f0736be9b4af4298d88e0ecb7842bb5f86cfd2e1f7f3bfc039bbb207976e76388b148a26d43803c08a21d289a4e1d371946f52d98fe9e0fe1a6ed6a45491c06a8b6427a14f4d7b38c704375950bfb0ccae45612f1c60f0cf89c3b63e8ed985ac7083befa6af83a64789eb60907502d92b0683021051181f44a23f8770efe01569942e35137e8091925e4215a20f0914e3d156d95d3d25789050ecadb559db6dd08e5b6939ee4449151a4542cbb8c3bdc9b6e6f167f62699ad6437ca4c2dc43d787ca29918b03c797f398e0716310a8cec1c5d02c099e7665e9651bb3451d4d720f39bb1be6cc868740133fa8b2654b2fcac3c1a4230ac9a39d25d2c28ed23a717b721e69079a142108ad45967ca4b5c2f340402acffe209ca450e9ce431bcf2d422e2347febedd136dc3cdb468b2f01b43b45694ed2fec3ab4f06a85ea74c752a3e12b64e218de94029be5d1969e5769cace27b846b3de945f641b81db1aa8a840dc5ff688f834c0a0d2d03a6abce23fccfd822e2aae4e32cc49257558da41636affeb566515067be0a8de900ebd2dca315def2d115353e6ec36c4e2e8212917c5592c7bb6a8ca1d7b674f947bff7e71389e276409e9e092b42d2b53d370ce6f4082e669ebb6be25485440ca01772a83e2cbeecdb945f59f12d2421abac939814f40d76575bd47f5b1540f5ccac85735566f4ae69e839cf98061842ab0b122931c43402c9524e1506c0887a3014639d3bde1e70c1d0b6e273f8ce055cd40220ef330a080280f0a86c1224c3755ea58921c7857b870d68e0e9cd68a079417cfb786b1ff929e7f26cdc7").unwrap().try_into().unwrap();
         assert_eq!(ct, exp_ct);
 
         let ss: [u8; 32] = hash[0..32].try_into().unwrap();

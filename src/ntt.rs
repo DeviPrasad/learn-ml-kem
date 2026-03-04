@@ -1,5 +1,5 @@
 use crate::field::{modq, modq_i64};
-use crate::params::{N, Q, QI32, RANK};
+use crate::params::{N, Q, QI32, K};
 use crate::ring::Poly;
 use crate::sampler::XOF128;
 
@@ -179,12 +179,12 @@ impl NTT {
 
 #[allow(unused)]
 impl NTT {
-    pub fn sample_ntt_matrix(rho: &[u8; 32], mut ah: &mut [[NTT; RANK]; RANK]) {
+    pub fn sample_ntt_matrix(rho: &[u8; 32], mut ah: &mut [[NTT; K]; K]) {
         let mut rho_j_i = [0u8; 34];
         rho_j_i[0..32].copy_from_slice(rho);
-        for i in 0..RANK {
+        for i in 0..K {
             rho_j_i[33] = i as u8;
-            for j in 0..RANK {
+            for j in 0..K {
                 rho_j_i[32] = j as u8;
                 NTT::sample_ntt(&rho_j_i, &mut ah[i][j]);
             }

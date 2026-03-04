@@ -1,4 +1,4 @@
-use crate::params::{ETA1, ETA2, RANK};
+use crate::params::{ETA1, ETA2, K};
 use crate::prf;
 use crate::ring::Poly;
 use sha3::digest::{ExtendableOutput, Update, XofReader};
@@ -50,8 +50,8 @@ pub fn sample_poly_cbd_eta1(b: &[u8; 64 * 2], f: &mut Poly) {
     f.sample_poly_cbd_eta_2(b)
 }
 
-pub fn sample_secret_eta1(sigma: [u8; 32], n: &mut u8, s: &mut [Poly; RANK]) {
-    for i in 0..RANK {
+pub fn sample_secret_eta1(sigma: [u8; 32], n: &mut u8, s: &mut [Poly; K]) {
+    for i in 0..K {
         let mut prd = [0u8; 64 * ETA1 as usize];
         prf::prf_eta1(&sigma, *n, &mut prd);
         sample_poly_cbd_eta1(&prd, &mut s[i]);
