@@ -1,6 +1,54 @@
-# The Annotated Key Generation Algorithm
 
-```{=latex}
+\documentclass[12pt]{article}
+\usepackage{geometry}
+\usepackage{caption}
+\usepackage{titling}
+\usepackage{xcolor}
+\usepackage{amsmath,amscd}
+\usepackage{stmaryrd}
+\usepackage{caption}
+\usepackage{hyperref}
+\usepackage{graphicx}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{fontspec}
+\usepackage{unicode-math}
+
+\input{macros.tex}
+
+\geometry{a4paper, top=2.5cm, bottom=2.5cm, left=2.2cm, right=2.2cm}
+\setlength{\droptitle}{-3cm}
+\hypersetup{colorlinks=true, linkcolor=blue, urlcolor=blue, citecolor=blue}
+\captionsetup{
+    justification=centering,
+    font=small,
+}
+
+\setmainfont{TeX Gyre Pagella}
+\setmathfont{Asana Math}
+
+\newcommand{\SixPtSp}{\vspace*{6pt}\\}
+\newcommand{\OnePtSp}{\vspace*{1pt}\\}
+\newcommand{\TwoPtSp}{\vspace*{2pt}\\}
+\newcommand{\Red}[1]{\textcolor{red}{ #1 }}
+\newcommand{\SmallBlackTrRt}{{\raisebox{2pt}{\scalebox{0.6}{$\blacktriangleright \ $}}}}
+
+\title{The Annotated ML KEM Scheme\TwoPtSp {\large{The K-PKE Component of the ML KEM Scheme}}}
+
+\author{Devi Prasad M \OnePtSp
+        Manipal School of Information Sciences \OnePtSp
+        Manipal University, India \TwoPtSp
+        \texttt{devi.prasad@manipal.edu}\OnePtSp
+        (Alternate: \texttt{dprasadm@gmail.com})}
+
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\newpage
+\section{The Annotated Key Generation Algorithm}
+
 \begin{algorithm}[H]
 \caption*{\textbf{Annotated Algorithm 13} $\Name{K-PKE.KeyGen}(d:\mathbb{B}^{32}) \rightarrow (ek_{PKE}:\mathbb{B}^{384k+32}, dk_{PKE}: \mathbb{B}^{384k}$)}
 \begin{algorithmic}[1]
@@ -75,11 +123,11 @@
 
 \end{algorithmic}
 \end{algorithm}
-```
 
-# The Annotated K-PKE.Encrypt Algorithm
 
-```{=latex}
+\newpage
+\section{The Annotated K-PKE.Encrypt Algorithm}
+
 \begin{algorithm}[H]
 \caption*{\textbf{Annotated Algorithm 14} $\Name{K-PKE.Encrypt}(\EKPKE:\mathbb{B}^{384k+32}, m: \mathbb{B}^{32}, r:\mathbb{B}^{32}) \rightarrow c:\mathbb{B}^{32(d_{u}k + d_v)}$}
 \begin{algorithmic}[1]
@@ -149,11 +197,11 @@
 
 \end{algorithmic}
 \end{algorithm}
-```
 
-# The Annotated K-PKE.Decrypt Algorithm
 
-```{=latex}
+\newpage
+\section{The Annotated K-PKE.Decrypt Algorithm}
+
 \begin{algorithm}[H]
 \caption*{\textbf{Annotated Algorithm 15} $\Name{K-PKE.Decrypt}(\DKPKE:\mathbb{B}^{384k}, c:\mathbb{B}^{32(d_u k + d_v)}) \rightarrow m: \mathbb{B}^{32}$}
 \begin{algorithmic}[1]
@@ -187,4 +235,4 @@
 \end{algorithmic}
 \end{algorithm}
 
-```
+\end{document}

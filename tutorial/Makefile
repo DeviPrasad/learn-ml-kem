@@ -8,10 +8,10 @@ sampler: sampler.md
 	@echo "sampler.pdf is ready."
 	@open sampler.pdf
 
-k-pke: k-pke.md k-pke.yaml
-	pandoc k-pke.md --log=pandoc.log --defaults=pdf-defaults.yaml --metadata-file=k-pke.yaml --syntax-highlighting=tango -o k-pke.pdf
-	@echo "k-pke.pdf is ready."
-	@open k-pke.pdf
+pke: pke.tex
+	xelatex pke.tex
+	@echo "pke.pdf is ready."
+	@open pke.pdf
 
 clean:
 	rm -f *.html
