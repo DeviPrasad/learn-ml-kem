@@ -1,6 +1,40 @@
-## Compression and Decompression Algorithms.
+\documentclass[12pt]{article}
+\usepackage{geometry}
+\usepackage{caption}
+\usepackage{titling}
+\usepackage{xcolor}
+\usepackage{amsmath,amscd}
+\usepackage{stmaryrd}
+\usepackage{caption}
+\usepackage{hyperref}
+\usepackage{graphicx}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{fontspec}
+\usepackage{unicode-math}
 
-```{=latex}
+\input{macros.tex}
+
+\geometry{a4paper, top=2.5cm, bottom=2.5cm, left=2.2cm, right=2.2cm}
+\setlength{\droptitle}{-3cm}
+\hypersetup{colorlinks=true, linkcolor=blue, urlcolor=blue, citecolor=blue}
+\captionsetup{
+    justification=centering,
+    font=small,
+}
+
+\setmainfont{TeX Gyre Pagella}
+\setmathfont{Asana Math}
+
+\title{The Annotated ML KEM Scheme\TwoPtSp {\large{Rejection Sampling in ML-KEM}}}
+\AuthorDeviPrasad
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\newpage
+\section{Compression and Decompression Algorithms.}
 \begin{algorithm}[H]
 \caption*{\textbf{Annotated Algorithm} $\Name{Compress}_d(x: \Zq) \rightarrow y:\ZTwoPowD $}
 \begin{algorithmic}[1]
@@ -10,9 +44,8 @@
 
 \end{algorithmic}
 \end{algorithm}
-```
 
-```{=latex}
+
 \begin{algorithm}[H]
 \caption*{\textbf{Annotated Algorithm} $\Name{Decompress}_d(y: \ZTwoPowD) \rightarrow x:\Zq $}
 \begin{algorithmic}[1]
@@ -22,12 +55,9 @@
 
 \end{algorithmic}
 \end{algorithm}
-```
 
+\section{Algorithm 5. ByteEncode.}
 
-## Algorithm 5. ByteEncode.
-
-```{=latex}
 \begin{algorithm}[H]
 \caption*{\textbf{Annotated Algorithm 5} $\Name{ByteEncode}_d(F:\RingZm) \rightarrow B:\mathbb{B}^{32} $}
 
@@ -56,10 +86,10 @@
 
 \end{algorithmic}
 \end{algorithm}
-```
 
-## Algorithm 6. ByteDecode.
-```{=latex}
+
+\section{Algorithm 5. ByteDecode.}
+
 \begin{algorithm}[H]
 \caption*{\textbf{Annotated Algorithm 6} $\Name{ByteDecode}_d(B:\mathbb{B}^{32}) \rightarrow F:\RingZm $}
 \begin{algorithmic}[1]
@@ -80,12 +110,8 @@
 \State{\Return $F$ }
 \end{algorithmic}
 \end{algorithm}
-```
 
-
-## Algorithm 7: SampleNTT.
-
-```{=latex}
+\section{Algorithm 7: SampleNTT.}
 \newcommand{\AH}{\ensuremath{\widehat{a}\;\!}}
 \newcommand{\Ctx}{\mathrm{ctx}}
 \newcommand{\XOFInit}{\mathrm{XOF.Init}}
@@ -155,10 +181,8 @@
 
 \end{algorithmic}
 \end{algorithm}
-```
 
-## Algorithm 8: SamplePolyCBD.
-
+\section{Algorithm 8: SamplePolyCBD.}
 ML-KEM samples error (noise) polynomials whose coefficients are small integers. Depending on the chosen parameter set, each coefficient is drawn from a centered binomial distribution with support either [-2, 2] or [-3, 3].
 
 Algorithm $SamplePolyCBD_\eta$ is parameterized by $\eta \in \{2, 3\}$. It receives a byte sequence $B$ of length $64 \eta$, and computes a polynomial $f$ with coefficients in the range $[-\eta, \eta]$.
@@ -177,8 +201,6 @@ It is easy to see that this method requires an input of size $64 \eta$ bytes to 
 
 In line 1 of algorithm 8, parameter $B: \mathbb{B}^{64\eta}$ is converted into a sequence of $64*8*\eta$ bits. Lines 3 and 4 sum the next $\eta$ bits each giving $x$ and $y$. Line 5 computes $i^{th}$ coefficient as $x-y \operatorname{mod} q$.
 
-
-```{=latex}
 \begin{algorithm}[H]
 \caption*{\textbf{Annotated Algorithm 8} $\Name{SamplePolyCBD}_\eta(B:\mathbb{B}^{64\eta}) \rightarrow (f:\RingZq$)}
 \begin{algorithmic}[1]
@@ -203,14 +225,11 @@ In line 1 of algorithm 8, parameter $B: \mathbb{B}^{64\eta}$ is converted into a
 
 \end{algorithmic}
 \end{algorithm}
-```
 
 Algorithms \textbf{K-PKE.KeyGen} and \textbf{K-PKE.Encrypt} use $SamplePolyCBD_\eta$. \textbf{K-PKE.KeyGen} uses the parameter $\eta_1$ to produce \textit{two} noise polynomials, $s$ and $e$. \textbf{K-PKE.Encrypt} uses the parameter $\eta_1$ to sample a secret term $y$. It also uses $\eta_2$ to produce \textit{two} noise terms, $e_1$ and $e_2$.
 
 Depending on the security parameters, $\eta_1 = 2$ or $\eta_1 = 3$. The parameter $\eta_2 = 2$ in all security settings. We can re-write $SamplePolyCBD_\eta$ as two algorithms, each specialized for the distinct value of $\eta$. This refactoring helps in understanding the implementation of \textit{centered binomial distribution} in FIPS 203. This idea is easily translated to Rust code, which is also shown below.
 
-
-```{=latex}
 \begin{algorithm}[H]
 \caption*{\textbf{Annotated Algorithm 8-A} $\Name{SamplePolyCBD}_2(B:\mathbb{B}^{128}) \rightarrow (f:\RingZq$)}
 \begin{algorithmic}[1]
@@ -237,10 +256,7 @@ Depending on the security parameters, $\eta_1 = 2$ or $\eta_1 = 3$. The paramete
 
 \end{algorithmic}
 \end{algorithm}
-```
 
-
-```{=latex}
 \begin{algorithm}[H]
 \caption*{\textbf{Annotated Algorithm 8-B} $\Name{SamplePolyCBD}_3(B:\mathbb{B}^{192}) \rightarrow (f:\RingZq$)}
 \begin{algorithmic}[1]
@@ -267,4 +283,6 @@ Depending on the security parameters, $\eta_1 = 2$ or $\eta_1 = 3$. The paramete
 
 \end{algorithmic}
 \end{algorithm}
-```
+
+
+\end{document}

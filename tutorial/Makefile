@@ -3,8 +3,8 @@ def: def.tex
 	@echo "def.pdf is ready."
 	@open def.pdf
 
-sampler: sampler.md
-	pandoc sampler.md --log=pandoc.log --defaults=pdf-defaults.yaml --metadata-file=sampler.yaml --syntax-highlighting=tango -o sampler.pdf
+sampler: sampler.tex
+	xelatex sampler.tex
 	@echo "sampler.pdf is ready."
 	@open sampler.pdf
 
@@ -12,6 +12,12 @@ pke: pke.tex
 	xelatex pke.tex
 	@echo "pke.pdf is ready."
 	@open pke.pdf
+
+all:
+	xelatex def.tex
+	xelatex pke.tex
+	xelatex sampler.tex
+
 
 clean:
 	rm -f *.html

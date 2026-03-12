@@ -1,3 +1,0 @@
-# set the default PDF engine to xelatex.
-# other options are pdflatex and lualatex.
-pdf-engine: xelatex
