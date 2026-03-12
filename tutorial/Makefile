@@ -1,5 +1,5 @@
-def: def.md
-	pandoc def.md --log=pandoc.log --defaults=pdf-defaults.yaml --metadata-file=def.yaml --syntax-highlighting=tango -o def.pdf
+def: def.tex
+	xelatex def.tex
 	@echo "def.pdf is ready."
 	@open def.pdf
 

@@ -1,6 +1,15 @@
 /target
+bin/
+lib/
+.DS_Store
 .idea/
-.vscode
+.vscode/
+*.sty
+*.sh
 *.log
+*.aux
+*.nav
+*.out
+*.snm
+*.toc
 *.pdf
-
