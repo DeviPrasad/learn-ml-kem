@@ -1,5 +1,6 @@
 
 \documentclass[12pt]{article}
+%\usepackage[libertine]{newtxmath}
 \usepackage{geometry}
 \usepackage{caption}
 \usepackage{titling}
@@ -24,6 +25,19 @@
     font=small,
 }
 
+%\setmainfont{TeX Gyre Pagella}
+%\setmathfont{Asana Math}
+
+\setmainfont{Libertinus Serif}
+\setsansfont{Libertinus Sans}
+%\setmathfont{Libertinus Math}
+\setmathfont{STIX Two Math}
+%\setmonofont{Libertinus Mono}
+\setmonofont{lmmono10-regular.otf}[
+  BoldFont = lmmonolt10-bold.otf,
+  ItalicFont = lmmono10-italic.otf,
+]
+
 \title{Mathematical Definitions for ML-KEM}
 \AuthorDeviPrasad
 \date{\today}
@@ -42,7 +56,10 @@ $\zeta$        & Denotes the integer value 17.\\
                & In other words, $\zeta^{256} = 1 \Mod{q}$. \TwoPtSp
                & \SmallBlackTrRt Python Snippet 1:\OnePtSp
                & \quad\quad\texttt{{assert pow(17, 256, 3329) == 1}}\SixPtSp
+
 $\mathbb{Z}$   & The set of integers.\SixPtSp
+
+$\mathbb{R}$   & The set of real numbers.\SixPtSp
 
 $\mathbb{Z}_q$ & The \textbf{\textit{field}} of integers modulo $q$.\\
                & The underlying set is \{0, 1, \ldots, 3328\}\\
@@ -101,26 +118,46 @@ operations satisfy the following axioms:
               for all $a \in R$.
     \item Additive identity 1 is different from multiplicative identity 0
         \begin{itemize}
-            \item[${\color{blue}{\diamond}}$] $1 \neq 0$.
+            \item $1 \neq 0$.
         \end{itemize}
     \item The operation  $\times$ is associative
         \begin{itemize}
-            \item[${\color{blue}{\diamond}}$] $a \times (b \times c) = (a \times b) \times c$ for all $a, b, c \in R.$
+            \item $a \times (b \times c) = (a \times b) \times c$ for all $a, b, c \in R.$
         \end{itemize}
     \item The operation $\times$ is distributive over +
         \begin{itemize}
-            \item[${\color{blue}{\diamond}}$] $a \times (b + c) = (a \times b) + (a \times c)$
-                        for all $a, b, c \in R.$
+            \item $a \times (b + c) = (a \times b) + (a \times c)$ for all $a, b, c \in R.$
         \end{itemize}
 \end{enumerate}
 
 \subsection{Polynomial Rings}
 
 \subsection{Vector Space and Vector Basis}
+\noindent
 A \textbf{vector space} $V$ is a set that is closed under vector addition and scalar multiplication.
 
+\noindent
 In general, the scalars are members of a \textit{field} $F$, and we say something like "vector space over a filed".
 
+\noindent
+Let $V$ be a vector space over a field $F$ (for example, over $\mathbb{R}$).
+
+
+\noindent
+Let $v_1, v_2, \ldots, v_n \in V$ be linearly independent vectors in $V$. Then, the \textbf{span}
+of these vectors is the set of all linear combinations of the vectors.
+$$
+    \textit{span}_{\mathbb{R}}(v_1, v_2, \ldots, v_n) = \{a_1 v_1 + a_2 v_2 + \ldots + a_n v_n \mid a_i \in \mathbb{R}\}
+$$
+
+\noindent
+The \textbf{Z-linear span} of these vectors is the set of all linear combinations
+of these vectors with integer coefficients.
+$$
+    \textit{span}_{\mathbb{Z}}(v_1, v_2, \ldots, v_n) = \{a_1 v_1 + a_2 v_2 + \ldots + a_n v_n \mid a_i \in \mathbb{Z}\}
+$$
+
+\noindent
 \subsection{Module}
 A \textbf{module} is similar to vector space, but its coefficients are members of a \text{ring}, instead of a \text{field}. Therefore, we say "modules generalize the concept of a vector space".
 
@@ -128,5 +165,13 @@ A \textbf{module} is similar to vector space, but its coefficients are members o
 
 
 \subsection{Module Lattice}
+
+\[
+\begin{array}{ll}
+    \text{LWE} & \text{vectors over} \ \mathbb{Z}_q \TwoPtSp
+    \text{Ring-LWE} & \text{module rank 1 over} \ R_q \TwoPtSp
+    \text{Module-LWE} & \text{module rank} \ $k$ \ \text{over} \ R_q \TwoPtSp
+\end{array}
+\]
 
 \end{document}
